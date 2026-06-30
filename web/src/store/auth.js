@@ -28,6 +28,16 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(res))
   }
 
+  // 模拟登录（后端未启动时使用）
+  function demoLogin(username, roleType, roleName) {
+    const fakeToken = 'demo-token-' + Date.now()
+    const fakeUser = { id: roleType * 100, username, real_name: username, role_type: roleType, role_name: roleName, org_id: 1, status: 1 }
+    token.value = fakeToken
+    user.value = fakeUser
+    localStorage.setItem('token', fakeToken)
+    localStorage.setItem('user', JSON.stringify(fakeUser))
+  }
+
   function logout() {
     token.value = ''
     user.value = null
@@ -35,5 +45,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('user')
   }
 
-  return { token, user, permissions, isLoggedIn, role, isTeacher, isStudent, isAdmin, login, logout, fetchUserInfo }
+  return { token, user, permissions, isLoggedIn, role, isTeacher, isStudent, isAdmin, login, demoLogin, logout, fetchUserInfo }
 })

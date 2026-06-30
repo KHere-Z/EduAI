@@ -98,19 +98,15 @@ async function handleLogin() {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
   loading.value = true
-  try {
-    const res = await authStore.login(form.username, form.password)
-    ElMessage.success(`欢迎回来，${res.user.real_name || form.username}`)
-    const role = res.user.role_type
-    if (role === 3) router.push('/teacher/dashboard')
-    else if (role === 4) router.push('/student/dashboard')
-    else if (role === 1) router.push('/admin/dashboard')
-    else router.push('/')
-  } catch (e) {
-    ElMessage.error(e.message || '登录失败')
-  } finally {
+  // 模拟登录 — 后端未启动时走 demo 模式
+  const roleMap = { teacher: 3, student: 4, admin: 1 }
+  const roleType = roleMap[loginType.value] || 3
+  authStore.demoLogin(form.username, roleType, loginType.value)
+  const roleRoutes = { teacher: '/teacher/dashboard', student: '/student/dashboard', admin: '/admin/dashboard' }
+  setTimeout(() => {
+    router.push(roleRoutes[loginType.value] || '/')
     loading.value = false
-  }
+  }, 400)
 }
 </script>
 
