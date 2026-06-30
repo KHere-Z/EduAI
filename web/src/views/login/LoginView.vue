@@ -107,13 +107,8 @@ async function handleLogin() {
     else if (roleType === 4) router.push('/student/dashboard')
     else if (roleType === 1) router.push('/admin/dashboard')
     else router.push('/')
-  } catch {
-    // 后端未启动 → 模拟登录
-    const roleMap = { teacher: 3, student: 4, admin: 1 }
-    const roleType = roleMap[loginType.value] || 3
-    authStore.demoLogin(form.username, roleType, loginType.value)
-    const roleRoutes = { teacher: '/teacher/dashboard', student: '/student/dashboard', admin: '/admin/dashboard' }
-    setTimeout(() => router.push(roleRoutes[loginType.value] || '/'), 400)
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || e.message || '登录失败')
   } finally {
     loading.value = false
   }
