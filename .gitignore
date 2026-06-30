@@ -5,3 +5,10 @@ node_modules/
 *.log
 .env.local
 .env
+
+# Maven / IDE
+server/target/
+server/.idea/
+*.class
+*.jar
+!.mvn/
