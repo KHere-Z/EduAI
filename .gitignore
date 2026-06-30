@@ -11,6 +11,10 @@ target/
 .project
 .classpath
 
+# Node
+node_modules/
+package-lock.json
+
 # OS
 .DS_Store
 Thumbs.db
@@ -21,3 +25,7 @@ logs/
 
 # Env
 .env
+.env.local
+
+# Test
+*.db

@@ -10,4 +10,12 @@
     </parent>
     <artifactId>eduai-security</artifactId>
     <name>EduAI security</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.eduai</groupId>
+            <artifactId>eduai-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 </project>

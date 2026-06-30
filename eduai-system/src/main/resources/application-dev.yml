@@ -1,0 +1,25 @@
+# ==================== 开发环境专属配置 ====================
+# 激活方式: spring.profiles.active: dev（已在 application.yml 中设置）
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/eduai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: root
+    hikari:
+      maximum-pool-size: 10          # 开发环境降低连接数
+      minimum-idle: 2
+
+  jpa:
+    show-sql: true                   # 开发环境打印 SQL 方便调试
+    hibernate:
+      ddl-auto: update               # 开发环境自动更新表结构
+    properties:
+      hibernate:
+        format_sql: true             # 格式化 SQL
+
+# 日志
+logging:
+  level:
+    com.eduai: debug
+    org.hibernate.SQL: debug         # Hibernate SQL 日志
+    org.hibernate.type.descriptor.sql.BasicBinder: trace  # SQL 参数绑定日志

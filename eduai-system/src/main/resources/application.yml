@@ -1,25 +1,45 @@
 server:
   port: 8080
 
+
 spring:
   application:
     name: eduai-server
   profiles:
     active: dev
 
-  # 数据库配置（开发环境）
+  # ==================== 数据库配置 ====================
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/eduai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://localhost:3306/eduai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
     username: root
     password: root
+    # HikariCP 连接池（Spring Boot 3.x 默认）
+    hikari:
+      maximum-pool-size: 20          # 最大连接数
+      minimum-idle: 5                # 最小空闲连接
+      idle-timeout: 300000           # 空闲超时 5分钟
+      connection-timeout: 20000      # 连接等待超时 10秒
+      max-lifetime: 1200000          # 连接最大存活 20分钟
+      leak-detection-threshold: 60000 # 连接泄露检测 60秒
+      pool-name: EduAI-HikariPool
 
-  # JPA 配置
+  # JPA / Hibernate 配置
   jpa:
     hibernate:
-      ddl-auto: update
-    show-sql: false
-    open-in-view: false
+      ddl-auto: update                          # 开发: update / 生产: validate
+    show-sql: false                             # 控制台打印 SQL
+    open-in-view: false                         # 禁用 OSIV
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true                        # 格式化 SQL 输出
+        jdbc:
+          batch_size: 20                        # 批量操作大小
+          fetch_size: 100                       # 查询批次大小
+        order_inserts: true                     # 排序 INSERT 提升批量性能
+        order_updates: true                     # 排序 UPDATE 提升批量性能
+        default_batch_fetch_size: 100           # 懒加载批量抓取
 
   # Redis 配置
   data:
@@ -30,7 +50,8 @@ spring:
 # Sa-Token 认证配置
 sa-token:
   token-name: Authorization
-  timeout: 604800        # 7天
+  token-prefix: Bearer    # Authorization: Bearer <token>
+  timeout: 604800          # 7天
   active-timeout: -1
   is-concurrent: true
   is-share: true
