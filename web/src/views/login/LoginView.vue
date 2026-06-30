@@ -88,7 +88,7 @@ const roles = [
   { label: '管理', value: 'admin' }
 ]
 
-const form = reactive({ username: 'coach', password: 'coach123' })
+const form = reactive({ username: '', password: '' })
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]

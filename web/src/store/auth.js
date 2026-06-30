@@ -32,15 +32,17 @@ export const useAuthStore = defineStore('auth', () => {
   function demoLogin(username, roleType, roleName) {
     const fakeToken = 'demo-token-' + Date.now()
     // 每个老师有自己教的学科列表，按用户名分配不同组合方便测试
-    const subjectMap = {
-      'math': ['math'],
-      'chinese': ['chinese'],
-      'physics': ['physics'],
-      'multi': ['math', 'physics', 'chemistry'],
-      'all': ['math', 'physics', 'chemistry', 'biology', 'chinese', 'english', 'history', 'politics', 'geography']
+    // 模拟登录 — 匹配数据库实际测试账号
+    const fakeUsers = {
+      'coach':   { name: '李老师', subjects: ['math','physics'] },
+      'english': { name: '王老师', subjects: ['english'] },
+      'math':    { name: '张老师', subjects: ['math'] },
+      'multi':   { name: '陈老师', subjects: ['math','physics','chemistry'] },
+      'admin':   { name: '系统管理员', subjects: ['math','physics','chemistry','biology','chinese','english','history','politics','geography'] }
     }
-    const subjects = subjectMap[username] || ['math', 'physics']
-    const fakeUser = { id: roleType * 100, username, realName: username, roleType, subjects }
+    const info = fakeUsers[username] || { name: username, subjects: ['math','physics'] }
+    const subjects = info.subjects
+    const fakeUser = { id: roleType * 100, username, realName: info.name, roleType, subjects }
     token.value = fakeToken
     user.value = fakeUser
     localStorage.setItem('token', fakeToken)
