@@ -87,22 +87,33 @@ const statCards = [
   { label:'待批作业', value:7,  icon:'Edit',    bg:'#FEF2F2' }
 ]
 
-const actions = [
-  { text:'英语课堂', icon:'Reading',    path:'/coach/classroom',   bg:'#EEF2FF' },
-  { text:'AI 阅读',  icon:'Notebook',   path:'/coach/ai-reading',  bg:'#ECFDF5' },
-  { text:'词汇测试', icon:'Document',   path:'/coach/vocab-test',  bg:'#FFF7ED' },
-  { text:'语法体系', icon:'Files',      path:'/coach/grammar',     bg:'#FEF2F2' },
-  { text:'AI 口语',  icon:'MagicStick', path:'/coach/ai-dialogue', bg:'#F5F3FF' },
-  { text:'学习反馈', icon:'ChatLineSquare', path:'/coach/feedback',bg:'#F0FDFA' }
-]
+const subjectMeta = { chinese:{label:'语文',icon:'📝'}, math:{label:'数学',icon:'📐'}, english:{label:'英语',icon:'📖'}, physics:{label:'物理',icon:'⚛️'}, chemistry:{label:'化学',icon:'🧪'}, biology:{label:'生物',icon:'🧬'}, history:{label:'历史',icon:'📜'}, politics:{label:'政治',icon:'⚖️'}, geography:{label:'地理',icon:'🌍'} }
 
-const subjects = [
-  { value:'chinese',  label:'语文', icon:'📝' }, { value:'math', label:'数学', icon:'📐' },
-  { value:'english',  label:'英语', icon:'📖' }, { value:'physics', label:'物理', icon:'⚛️' },
-  { value:'chemistry',label:'化学', icon:'🧪' }, { value:'biology', label:'生物', icon:'🧬' },
-  { value:'history',  label:'历史', icon:'📜' }, { value:'politics', label:'政治', icon:'⚖️' },
-  { value:'geography',label:'地理', icon:'🌍' }
-]
+// 根据老师任教学科动态生成
+const teacherSubjects = computed(() => auth.user?.subjects || [])
+const hasEnglish = computed(() => teacherSubjects.value.includes('english'))
+
+const subjects = computed(() =>
+  teacherSubjects.value.filter(k => subjectMeta[k]).map(k => ({ value:k, ...subjectMeta[k] }))
+)
+
+const actions = computed(() => {
+  const list = []
+  if (hasEnglish.value) {
+    list.push(
+      { text:'英语课堂', icon:'Reading',    path:'/teacher/classroom',   bg:'#EEF2FF' },
+      { text:'AI 阅读',  icon:'Notebook',   path:'/teacher/ai-reading',  bg:'#ECFDF5' },
+      { text:'词汇测试', icon:'Document',   path:'/teacher/vocab-test',  bg:'#FFF7ED' },
+      { text:'AI 口语',  icon:'MagicStick', path:'/teacher/ai-dialogue', bg:'#F5F3FF' }
+    )
+  }
+  if (teacherSubjects.value.length > 0) {
+    const first = teacherSubjects.value[0]
+    list.push({ text:subjectMeta[first]?.label+'错题', icon:'Edit', path:`/teacher/subject/${first}/wrong-questions`, bg:'#FFF7ED' })
+  }
+  list.push({ text:'学习反馈', icon:'ChatLineSquare', path:'/teacher/feedback', bg:'#F0FDFA' })
+  return list
+})
 
 const todayStats = [
   { label:'本月新增学员', value:'3 人' },

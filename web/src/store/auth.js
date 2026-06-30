@@ -31,7 +31,16 @@ export const useAuthStore = defineStore('auth', () => {
   // 模拟登录（后端未启动时使用）
   function demoLogin(username, roleType, roleName) {
     const fakeToken = 'demo-token-' + Date.now()
-    const fakeUser = { id: roleType * 100, username, real_name: username, role_type: roleType, role_name: roleName, org_id: 1, status: 1 }
+    // 每个老师有自己教的学科列表，按用户名分配不同组合方便测试
+    const subjectMap = {
+      'math': ['math'],
+      'chinese': ['chinese'],
+      'physics': ['physics'],
+      'multi': ['math', 'physics', 'chemistry'],
+      'all': ['math', 'physics', 'chemistry', 'biology', 'chinese', 'english', 'history', 'politics', 'geography']
+    }
+    const subjects = subjectMap[username] || ['math', 'physics']
+    const fakeUser = { id: roleType * 100, username, real_name: username, role_type: roleType, role_name: roleName, org_id: 1, status: 1, subjects }
     token.value = fakeToken
     user.value = fakeUser
     localStorage.setItem('token', fakeToken)
