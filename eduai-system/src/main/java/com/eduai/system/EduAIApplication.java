@@ -12,6 +12,8 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 /**
+ *
+ *
  * EduAI — 全学科 AI 智能教育平台
  * Spring Boot 启动入口
  *

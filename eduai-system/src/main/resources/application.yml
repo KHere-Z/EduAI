@@ -1,5 +1,10 @@
 server:
   port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true       # 强制请求也用 UTF-8 解码（修复前端 GBK 请求 500 问题）
 
 
 spring:
