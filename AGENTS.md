@@ -31,7 +31,7 @@
 | ② | 项目架构设计 | ✅ `docs/spec/02-architecture.md` |
 | ③ | 页面设计 & 前端编写 | ✅ `docs/spec/03-api-spec.md` |
 | ④ | 数据库设计与建立 | 🟢 认证3表✅ · 英语14表✅ · 学生管理4表✅（v2: students/teacher_student/enrollment/session） |
-| ⑤ | 后端接口开发 | 🟢 登录API✅ · 学生CRUD 全7接口✅（v2: 通过 teacher_student 关系表） |
+| ⑤ | 后端接口开发 | 🟢 登录✅ · 学生CRUD✅ · 管理员13接口✅ · 学生端9接口✅ |
 | ⑥ | 配置 AI 服务（DeepSeek） | ⏳ |
 | ⑦ | 部署上线 | ⏳ |
 
@@ -214,6 +214,14 @@ score-statistics  → 成绩统计（4核心指标+分布+明细）
 > 2026-06-30: 项目结构优化 — 清理16模块空占位目录，补全 .gitkeep，统一目录规范
 > 2026-07-02: 学生管理后端完成 — students/enrollment/session 3表 + 7个API端点(含日历)
 > 2026-07-02: 修复 POST 500 — Entity 改为双向映射(@ManyToOne)，解决 Hibernate INSERT 缺 FK 问题
+> 2026-07-03: 学生端完成 — enrollments/schedule/reschedule/checkin/streak + 老师端调课审批 9接口
+> 2026-07-03: AdminStudentDTO 新增 username/password — 管理员创建学生时可同步创建登录账号
+> 2026-07-03: Student 实体新增 userId 字段 — students↔users 关联（学生端登录入口）
+> 2026-07-03: 管理员老师CRUD完成
+> 2026-07-03: 学生端完整实现 — 首页+课表+打卡+调课+学科中心7功能
+> 2026-07-03: 调课申请全流程 — 学生提交→老师批准/待议→自动改排课
+> 2026-07-03: 学生账号创建 — 管理员新增学生时同步创建登录账号(username+password, roleType=4)
+> 2026-07-03: AGENTS.md 第十一章 — 管理员 API 完整对接指南（10个接口的请求/响应/错误码/检查清单）
 > 2026-07-02: 学生管理前端交互完善 — 排课按钮/课时联动/课程完成/清空排课归零
 > 2026-07-02: 修复 GlobalExceptionHandler — 改用 ResponseEntity 确保 401/403 正确返回到前端
 > 2026-07-02: 修复请求编码 — 加 server.servlet.encoding.force=true，强制 UTF-8 解码（前端 GBK→UTF-8）
@@ -223,8 +231,451 @@ score-statistics  → 成绩统计（4核心指标+分布+明细）
 
 ---
 
-## 十一、学生管理 API（前端对接）
-n### 前端交互逻辑
+## 十A、管理员端
+
+| 页面 | 路由 | 说明 |
+|------|------|------|
+| 管理概览 | `/admin/dashboard` | 4统计卡片 + 快捷入口 |
+| 学生管理 | `/admin/students` | 全局学生CRUD · 多选任课老师 |
+| 老师管理 | `/admin/teachers` | 老师卡片 + 详情弹窗 |
+| 排课查看 | `/admin/schedules` | 选老师→日历→详情 |
+| 系统设置 | `/admin/settings` | AI模型选择 + 配置 |
+
+### 学生↔老师 多对多关系
+
+- 前端: 任课老师列显示多个标签 · 编辑时 `teacherIds[]` 多选
+- 后端: POST/PUT 遍历 teacherIds，每个创建一条 teacher_student 记录
+- 更新: 先删旧的 teacher_student WHERE student_id=?，再插入新的
+
+```json
+// POST/PUT /api/v1/admin/students
+{ "name":"张三",
+  "username":"zhangsan", "password":"123456", ..., "teacherIds": [6, 2],
+  "username": "zhangsan", "password": "123456" }
+// → teacher_student(teacher_id=6,student_id=1) + (teacher_id=2,student_id=1)
+```
+
+### 管理员后端 API 状态
+
+| 方法 | 路径 | 说明 | 状态 |
+|------|------|------|------|
+| GET | `/api/v1/admin/students` | 全局学生列表(不过滤teacher_id) | ✅ |
+| POST | `/api/v1/admin/students` | 新增学生(含teacherIds) | ✅ |
+| PUT | `/api/v1/admin/students/{id}` | 更新学生 | ✅ |
+| DELETE | `/api/v1/admin/students/{id}` | 删除学生 | ✅ |
+| GET | `/api/v1/admin/teachers` | 老师列表(含学生数/课时) | ✅ |
+| POST | `/api/v1/admin/teachers` | 新增老师 | ✅ |
+| PUT | `/api/v1/admin/teachers/{userId}` | 更新老师 | ✅ |
+n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按 `name` 查找, 不存在则 INSERT 新机构, 然后将 `org_id` 写入 `teachers` 表。
+| DELETE | `/api/v1/admin/teachers/{userId}` | 删除老师 | ✅ |
+| GET | `/api/v1/admin/teachers/{id}` | 老师详情+学生列表 | ✅ |
+| GET | `/api/v1/admin/schedules` | 全部排课(?teacherId=&year=&month=) | ✅ |
+| GET | `/api/v1/admin/stats` | 概览统计 | ✅ |
+| GET | `/api/v1/admin/settings` | 获取系统配置 | ✅ |
+| PUT | `/api/v1/admin/settings` | 更新系统配置 | ✅ |
+
+> 全部需要登录（Sa-Token），**仅 roleType=1（管理员）可访问**，非管理员返回 403
+
+
+## 十一、管理员 API 对接指南 ← 前端同事看这里
+n## 十B、学生端
+
+| 页面 | 路由 | 说明 |
+|------|------|------|
+| 学习中心 | `/student/dashboard` | 学科卡片+今日课表+打卡日历 |
+| 课程表 | `/student/schedule` | 日历高亮+查看详情+申请调课 |
+| 学科中心 | `/student/subject/:subject` | 7功能入口 |
+| AI错题分析 | `/student/subject/math/wrong-analysis` | 拍照上传→AI解析 |
+| AI试卷分析 | `/student/subject/math/exam-analysis` | 上传试卷→扣分分析 |
+| 题库 | `/student/subject/math/question-bank` | 错题库+计时自习 |
+| AI动图 | `/student/subject/math/ai-animation` | 动点题生成动画 |
+| AI聊天 | `/student/subject/math/ai-chat` | 智能问答 |
+| 知识点 | `/student/subject/math/knowledge-points` | 本学���体系 |
+| 作业 | `/student/subject/math/homework` | 老师布置+打勾 |
+
+### 11.1 认证要求
+
+所有接口需要在 Header 中携带 token：
+
+```
+Authorization: Bearer <token>
+```
+
+先用 `admin / admin123` 调用 `POST /api/v1/auth/login` 获取 token。
+
+### 11.2 学生管理
+
+#### GET `/api/v1/admin/students` — 全局学生列表
+
+**查询参数**：`?page=1&pageSize=20&keyword=张&grade=初一`
+
+**响应**（`data` 内）：
+```json
+{
+  "list": [{
+    "id": 1,
+    "name": "张三",
+    "gender": "男",
+    "contact": "13800001111",
+    "grade": "初一",
+    "school": "第一实验中学",
+    "createdAt": "2026-07-02T10:00:00",
+    "updatedAt": "2026-07-02T10:00:00",
+    "teacherRelations": [
+      { "teacherId": 6, "teacherName": "赵老师", "subjects": ["英语","数学"], "hoursLeft": 15 },
+      { "teacherId": 2, "teacherName": "李老师", "subjects": ["数学"], "hoursLeft": 0 }
+    ]
+  }],
+  "total": 28, "page": 1, "pageSize": 20
+}
+```
+
+> **id** = `students.id`（全局学生ID，不是 teacher_student.id）
+
+#### POST `/api/v1/admin/students` — 新增学生
+
+**请求体**：
+```json
+{
+  "name": "张三",
+  "gender": "男",
+  "contact": "13800001111",
+  "grade": "初一",
+  "school": "第一实验中学",
+  "teacherIds": [6, 2],
+  "username": "zhangsan", "password": "123456"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| name | ✅ | 姓名 |
+| gender | 否 | 男/女 |
+| contact | 否 | 联系方式 |
+| grade | 否 | 一年级~高三 |
+| school | 否 | 所在学校 |
+| teacherIds | 否 | 任课老师ID列表（`users.id`），每个创建一个 teacher_student 记录 |
+|| username | ✅(新增) | 登录账号，创建 users 记录(roleType=4) |
+|| password | ✅(新增) | 登录密码 |
+
+**行为**：
+- 按姓名+学校查重，同名同校返回已有 Student 不重复创建
+- 遍历 teacherIds，跳过已存在的 teacher_student 关系（不报错）
+- 返回完整的 `AdminStudentVO`（含 `teacherRelations`）
+
+**响应**：同 GET 列表中的单条格式（`data` 直接是对象，无分页包裹）
+
+**错误**：
+| 场景 | code | message |
+|------|------|---------|
+| 姓名未填 | 400 | "姓名不能为空" |
+| 非管理员 | 403 | "仅管理员可访问" |
+
+#### PUT `/api/v1/admin/students/{id}` — 更新学生
+
+**请求体**：与 POST 相同格式
+
+**行为**：
+- 更新 Student 基本信息
+- **teacherIds 重建逻辑**：先删该学生的全部旧 teacher_student 记录，再按新 `teacherIds` 逐条插入
+- 如果 `teacherIds` 不传（null），则保留原有老师关系不变
+- 如果传 `"teacherIds": []`（空数组），清空所有老师关系
+
+#### DELETE `/api/v1/admin/students/{id}` — 删除学生
+
+**行为**：级联删除全部 teacher_student → enrollment → session，最后删除 Student 档案
+
+### 11.3 老师管理
+
+#### GET `/api/v1/admin/teachers` — 老师列表
+POST   | `/api/v1/admin/teachers` | 新增老师 | 🔴P0 |
+PUT    | `/api/v1/admin/teachers/{userId}` | 更新老师 | 🔴P0 |
+n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按 `name` 查找, 不存在则 INSERT 新机构, 然后将 `org_id` 写入 `teachers` 表。
+DELETE | `/api/v1/admin/teachers/{userId}` | 删除老师 | 🔴P0 |
+
+**查询参数**：`?page=1&pageSize=20&keyword=李`
+
+**响应**（`data` 内）：
+```json
+{
+  "list": [{
+    "id": 1,
+    "userId": 2,
+    "username": "coach",
+    "realName": "李老师",
+    "phone": null,
+    "email": null,
+    "subjects": ["math", "physics"],
+    "title": "高级教师",
+    "orgName": "第一实验中学",
+    "avatar": null,
+    "status": 1,
+    "studentCount": 5,
+    "totalHours": 120
+  }],
+  "total": 5, "page": 1, "pageSize": 20
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| id | teachers 表主键 |
+| userId | users 表主键（传给 GET teachers/{id} 用这个） |
+| subjects | 任教学科列表 |
+| studentCount | 该老师下的学生数量 |
+| totalHours | 该老师全部学生的剩余课时汇总 |
+
+#### GET `/api/v1/admin/teachers/{id}` — 老师详情
+
+> **注意**：路径中的 `{id}` 是 **`userId`**（`users.id`），不是 teachers.id
+
+**响应**（`data` 内）：
+```json
+{
+  "id": 1,
+  "userId": 2,
+  "username": "coach",
+  "realName": "李老师",
+  "phone": null,
+  "email": null,
+  "subjects": ["math", "physics"],
+  "title": "高级教师",
+  "orgName": "第一实验中学",
+  "avatar": null,
+  "bio": null,
+  "status": 1,
+  "studentCount": 5,
+  "totalHours": 120,
+  "students": [
+    {
+      "tsId": 10,
+      "studentId": 1,
+      "studentName": "张三",
+      "gender": "男",
+      "grade": "初一",
+      "school": "第一实验中学",
+      "hoursLeft": 15,
+      "subjects": ["英语", "数学"]
+    }
+  ]
+}
+```
+
+#### POST `/api/v1/admin/teachers` — 新增老师
+
+**请求体**：
+```json
+{
+  "realName": "张老师",
+  "username": "zhang",
+  "password": "123456",
+  "title": "高级教师",
+  "subjectIds": ["数学", "物理"],
+  "orgId": 1,
+  "phone": "138xxx",
+  "email": "zhang@example.com"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| realName | ✅ | 真实姓名 |
+| username | ✅(新增) | 用户名，唯一 |
+| password | ✅(新增) | 密码 |
+| title | 否 | 职称 |
+| subjectIds | 否 | 任教学科数组 → 逗号分隔存入 teachers.subject_ids |
+| orgId | 否 | 机构ID |
+| phone | 否 | 手机号 |
+| email | 否 | 邮箱 |
+
+**响应**：同 GET 列表中的单条 `AdminTeacherVO` 格式
+
+#### PUT `/api/v1/admin/teachers/{userId}` — 更新老师
+
+**请求体**：与 POST 相同格式。`password` 留空/不传 = 不修改密码，`username` 不变 = 可省略
+
+n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按 `name` 查找, 不存在则 INSERT 新机构, 然后将 `org_id` 写入 `teachers` 表。
+#### DELETE `/api/v1/admin/teachers/{userId}` — 删除老师
+
+**行为**：级联删除该老师的全部 teacher_student 关系 → Teacher 记录 → User 记录
+
+### 11.4 排课查看
+
+#### GET `/api/v1/admin/schedules` — 全部排课
+
+**查询参数**：`?teacherId=6&year=2026&month=7&page=1&pageSize=50`
+
+| 参数 | 说明 |
+|------|------|
+| teacherId | 可选，筛选指定老师的排课 |
+| year / month | 可选，筛选指定月份的排课（不传则返回全部） |
+| page / pageSize | 分页，默认 1/50 |
+
+**响应**（`data` 内）：
+```json
+{
+  "list": [
+    {
+      "sessionId": 1,
+      "classDate": "2026-07-03",
+      "startTime": "14",
+      "endTime": "16",
+      "subject": "英语",
+      "teacherId": 6,
+      "teacherName": "赵老师",
+      "studentId": 1,
+      "studentName": "张三"
+    }
+  ],
+  "total": 10, "page": 1, "pageSize": 50
+}
+```
+
+### 11.5 概览统计
+
+#### GET `/api/v1/admin/stats` — Dashboard 数据
+
+**响应**（`data` 内）：
+```json
+{
+  "teacherCount": 5,
+  "studentCount": 28,
+  "totalHours": 520,
+  "relationCount": 35,
+  "sessionCount": 80,
+  "enrollmentCount": 42
+}
+```
+
+| 字段 | 说明 | 用于 |
+|------|------|------|
+| teacherCount | 教师总数 | 统计卡片1 |
+| studentCount | 学生总数 | 统计卡片2 |
+| totalHours | 全部剩余课时汇总 | 统计卡片3 |
+| relationCount | 老师-学生关系总数 | 备用 |
+| sessionCount | 排课记录总数 | 统计卡片4 |
+| enrollmentCount | 报名科目总数 | 备用 |
+
+### 11.6 系统设置
+
+#### GET `/api/v1/admin/settings` — 获取配置
+
+**响应**（`data` 内）：
+```json
+{
+  "ai_model": "deepseek-chat",
+  "ai_api_key": "sk-xxx",
+  "ai_api_url": "https://api.deepseek.com/v1",
+  "system_name": "安文AI教育",
+  "max_concurrency": "10"
+}
+```
+
+> 首次使用时返回 `{}`，需要先 PUT 写入配置
+
+#### PUT `/api/v1/admin/settings` — 更新配置
+
+**请求体**（只传需更新的字段，未传的字段保持不变）：
+```json
+{
+  "aiModel": "deepseek-chat",
+  "aiApiKey": "sk-xxx",
+  "aiApiUrl": "https://api.deepseek.com/v1",
+  "systemName": "安文AI教育",
+  "maxConcurrency": "10"
+}
+```
+
+**响应**：返回更新后的全部配置（同 GET）
+
+### 11.7 前端对接检查清单
+
+1. ✅ **登录** → `POST /api/v1/auth/login` with `admin/admin123`，拿到 token
+2. ✅ **学生列表** → `GET /api/v1/admin/students`，展示表格 + `teacherRelations` 渲染为标签
+3. ✅ **新增学生** → 表单含 `teacherIds` 多选下拉（调 GET teachers 拿列表）
+4. ✅ **编辑学生** → 回填表单，teacherIds 重建逻辑由后端处理
+5. ✅ **删除学生** → 弹窗确认后调 DELETE（注意：会级联删除该学生的所有排课数据）
+6. ✅ **老师列表** → `GET /api/v1/admin/teachers`，卡片/表格展示
+7. ✅ **老师详情** → `GET /api/v1/admin/teachers/{userId}`，弹窗展示学生列表
+8. ✅ **排课查看** → 先选老师（调 GET teachers），再选月份，调 GET schedules
+9. ✅ **管理概览** → `GET /api/v1/admin/stats`，4 个统计卡片
+10. ✅ **系统设置** → `GET /api/v1/admin/settings` 回填 → PUT 保存
+
+### 11.8 错误处理
+
+统一响应格式，非 200 时 `message` 为可展示给用户的错误信息：
+
+```json
+{ "code": 400, "message": "该学生已存在（姓名+第一实验中学）", "data": null }
+{ "code": 401, "message": "请先登录", "data": null }
+{ "code": 403, "message": "仅管理员可访问", "data": null }
+{ "code": 404, "message": "学生不存在", "data": null }
+```
+
+
+## 十二、学生管理 API（老师端·前端对接）
+### 学生端后端 API 状态
+
+| 方法 | 路径 | 说明 | 状态 |
+|------|------|------|------|
+| GET | `/api/v1/student/enrollments` | 学生报名科目列表(用于学科中心) | ✅ |
+| GET | `/api/v1/student/schedule` | 学生课表(?year&month) | ✅ |
+| POST | `/api/v1/student/reschedule` | 提交调课申请 | ✅ |
+| GET | `/api/v1/teacher/reschedules` | 老师查看调课申请 | ✅ |
+| PUT | `/api/v1/teacher/reschedules/{id}/approve` | 批准调课 | ✅ |
+| PUT | `/api/v1/teacher/reschedules/{id}/defer` | 待议调课 | ✅ |
+| DELETE | `/api/v1/teacher/reschedules/{id}` | 关闭申请 | ✅ |
+| POST | `/api/v1/student/checkin` | 学习打卡 | ✅ |
+| GET | `/api/v1/student/streak` | 打卡天数 | ✅ |
+| POST | `/api/v1/student/subject/{subject}/wrong-question` | 上传错题图片 | ⏳ 待文件模块 |
+| POST | `/api/v1/student/subject/{subject}/exam` | 上传试卷 | ⏳ 待文件模块 |
+
+> 学生需已有 `students.user_id` 关联才能使用学生端 API。管理员创建学生时填 `username` 即自动绑定。
+
+### 学生端 API 对接指南
+
+#### 认证：学生用 `username/password` 登录 → 获取 token → 调以下接口
+
+#### GET `/api/v1/student/enrollments`
+```json
+{
+  "courses": [{
+    "tsId": 1, "subject": "英语", "teacherName": "王老师",
+    "teacherId": 3, "hoursLeft": 15,
+    "upcomingSessions": [
+      {"id": 1, "classDate": "2026-07-03", "startTime": "14", "endTime": "16"}
+    ]
+  }]
+}
+```
+
+#### GET `/api/v1/student/schedule?year=2026&month=7`
+```json
+{
+  "schedules": [
+    {"sessionId": 1, "classDate": "2026-07-03", "startTime": "14", "endTime": "16",
+     "subject": "英语", "teacherName": "王老师", "teacherId": 3}
+  ]
+}
+```
+
+#### POST `/api/v1/student/reschedule`
+```json
+// 请求
+{ "sessionId": 1, "requestedDate": "2026-07-10", "requestedStart": "16", "requestedEnd": "18", "reason": "临时有事" }
+// 响应: RescheduleVO（含 id/status= pending）
+```
+
+#### POST `/api/v1/student/checkin` — 打卡（无请求体，每日限一次）
+#### GET `/api/v1/student/streak` → `{ "streak": 5, "totalDays": 12, "checkedInToday": true }`
+
+#### 老师端调课：
+- **GET** `/api/v1/teacher/reschedules` → 待审批列表
+- **PUT** `/api/v1/teacher/reschedules/{id}/approve` → 批准(自动更新session日期)
+- **PUT** `/api/v1/teacher/reschedules/{id}/defer` → 待议
+- **DELETE** `/api/v1/teacher/reschedules/{id}` → 关闭
+
+### 前端交互逻辑
 
 - **排课按钮**: 下拉选择已有学生 → 选科目 → 日历点日期 → 填时间段 → 确认
 - **课时联动**: 排课保存后设置初始课时 · 点✅完成自动-1 · 清空排课归零
@@ -235,7 +686,7 @@ n### 前端交互逻辑
 
 > **后端状态**: ✅ 已实现 (v2) · 数据库已迁移 · **前端页面**: `/teacher/students`（就绪）  
 > **数据库 v2**: students(全局档案) / teacher_student(关系+课时) / student_enrollment / student_session  
-> **测试**: allsub(6/赵老师) 登录 → GET/POST/DELETE 全部可用，已预置张顺仪(英语15次+数学15次)  
+> **测试**: allsub(6/赵老师) 登录 → GET/POST/DELETE 全部可用，已预置张顺仪(英语15次+数学15次)
 
 ### v2 行为变化（前端需知）
 

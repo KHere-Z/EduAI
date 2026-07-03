@@ -43,6 +43,10 @@ public class Student {
     @Column(length = 100)
     private String school;
 
+    /** 关联用户ID（可选，学生登录账号 → users.id） */
+    @Column(name = "user_id")
+    private Long userId;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
