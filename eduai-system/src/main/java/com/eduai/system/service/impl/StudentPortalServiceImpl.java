@@ -88,6 +88,7 @@ public class StudentPortalServiceImpl implements StudentPortalService {
                                 .teacherName(teacherName)
                                 .teacherId(ts.getTeacherId())
                                 .hoursLeft(ts.getHoursLeft())
+                                .grade(student.getGrade())
                                 .upcomingSessions(upcoming)
                                 .build();
                     });

@@ -28,6 +28,7 @@ public class StudentEnrollmentVO {
         private String teacherName;
         private Long teacherId;
         private Integer hoursLeft;
+        private String grade;               // 学生年级（从 students.grade 读取）
         private List<SessionVO> upcomingSessions; // 近期排课
     }
 }

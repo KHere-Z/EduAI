@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -17,6 +18,11 @@ public interface StudentEnrollmentRepository extends JpaRepository<StudentEnroll
      * 按老师-学生关系ID查询所有报名科目
      */
     List<StudentEnrollment> findByTeacherStudentId(Long teacherStudentId);
+
+    /**
+     * 批量按老师-学生关系ID + 科目查询
+     */
+    List<StudentEnrollment> findByTeacherStudentIdInAndSubject(Collection<Long> tsIds, String subject);
 
     /**
      * 统计总报名数

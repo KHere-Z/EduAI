@@ -30,8 +30,8 @@
 | ① | 需求文档 & 技术栈 | ✅ `docs/spec/01-requirements.md` |
 | ② | 项目架构设计 | ✅ `docs/spec/02-architecture.md` |
 | ③ | 页面设计 & 前端编写 | ✅ `docs/spec/03-api-spec.md` |
-| ④ | 数据库设计与建立 | 🟢 认证3表✅ · 英语14表✅ · 学生管理4表✅（v2: students/teacher_student/enrollment/session） |
-| ⑤ | 后端接口开发 | 🟢 登录✅ · 学生CRUD✅ · 管理员13接口✅ · 学生端9接口✅ |
+| ④ | 数据库设计与建立 | 🟢 认证3表✅ · 英语14表✅ · 学生管理4表✅（v2）+ 题库2表✅（knowledge_points / question_bank） |
+| ⑤ | 后端接口开发 | 🟢 登录✅ · 学生CRUD✅ · 管理员10接口✅ · 题库+知识点API✅(14端点) · 前后端联调完成✅ |
 | ⑥ | 配置 AI 服务（DeepSeek） | ⏳ |
 | ⑦ | 部署上线 | ⏳ |
 
@@ -94,6 +94,7 @@ EduAI/                              ← Git 仓库
 │   │   ├── 04-database-auth.md
 │   │   └── 04-database-english.md
 │   │   └── 05-database-student.md     学生管理DB(3表+API)
+│   │   └── 07-database-questionbank.md  题库&知识点DB v2(2表)
 │   ├── sql/
 │   │   └── init-database.sql        数据库初始化脚本
 │   └── frontend-integration/        前端对接代码（复制到 web/ 项目）
@@ -213,11 +214,28 @@ score-statistics  → 成绩统计（4核心指标+分布+明细）
 > 2026-06-30: 前后端登录联调 — 后端 Sa-Token 完成（明文密码比对），前端对接代码就绪 docs/frontend-integration/
 > 2026-06-30: 项目结构优化 — 清理16模块空占位目录，补全 .gitkeep，统一目录规范
 > 2026-07-02: 学生管理后端完成 — students/enrollment/session 3表 + 7个API端点(含日历)
+> 2026-07-04: 题库DB v2 — knowledge_points 表 + question_bank 增加原图/配图/老师解析/画图字段
+> 2026-07-04: 老师端数学学科管理页 — 知识点CRUD(分页+年级筛选) + 题库管理(15题分页+7维筛选) + Canvas画图配图
+> 2026-07-04: 老师端上传题目 — 新题(全校共享)/错题(选学生) + AI分析自动保存
+> 2026-07-04: 知识点动态刷新 — 初三→初一~初三全阶段，高三→高一~高三，六年级→上下学期
+> 2026-07-04: 题库DB更新 — ER图+teacher_analysis_image字段+配图流程
+> 2026-07-04: 学生端题库挑战页 — 错题库/待做题/全屏自习/知识点侧边栏/掌握度标注
 > 2026-07-02: 修复 POST 500 — Entity 改为双向映射(@ManyToOne)，解决 Hibernate INSERT 缺 FK 问题
 > 2026-07-03: 学生端完成 — enrollments/schedule/reschedule/checkin/streak + 老师端调课审批 9接口
 > 2026-07-03: AdminStudentDTO 新增 username/password — 管理员创建学生时可同步创建登录账号
 > 2026-07-03: Student 实体新增 userId 字段 — students↔users 关联（学生端登录入口）
 > 2026-07-03: 管理员老师CRUD完成
+> 2026-07-03: 题库DB v2 — knowledge_points表 + question_bank增加原图/配图/AI识别字段
+> 2026-07-03: 老师端数学学科管理页 — 知识点CRUD + 题库管理 + 配图审核
+> 2026-07-04: 老师端上传题目 — 新题(全校共享)/错题(选学生) + AI分析自动保存
+> 2026-07-04: 知识点动态刷新 — 初三→初一~初三全阶段，高三→高一~高三，六年级→上下学期
+> 2026-07-04: 题库DB更新 — ER图+teacher_analysis_image字段+配图流程
+> 2026-07-04: ✅ 题库+知识点后端完成 — 2实体 + 13API端点(知识点5 + 老师题库5 + 学生题库2 + 知识点多学期1) + 19文件 + 6条测试数据
+> 2026-07-04: ✅ 前后端联调 — 知识点CRUD/题库列表/上传/详情对接完成 + 学生端待做题/错题库正常返回
+> 2026-07-04: 🔧 联调修复 — 学生grade自动过滤(前缀LIKE匹配"初一"→"初一·上学期") + 知识点学生角色开放 + 题目返回知识名称(knowledgePointNames) + enrollment新增grade字段
+> 2026-07-04: ✅ 老师端学生列表API — GET /api/v1/teacher/math-students(按老师+学科筛选) + student_enrollment.subject中文匹配修复
+> 2026-07-04: 🐛 排查多角色登录冲突 — 根因是前端localStorage token共享, 后端Sa-Token is-concurrent:true配置正确
+> 2026-07-04: 📝 AGENTS.md更新 — 第十一章题库&知识点API对接指南完整版(请求/响应示例/字段说明/检查清单)
 > 2026-07-03: 学生端完整实现 — 首页+课表+打卡+调课+学科中心7功能
 > 2026-07-03: 调课申请全流程 — 学生提交→老师批准/待议→自动改排课
 > 2026-07-03: 学生账号创建 — 管理员新增学生时同步创建登录账号(username+password, roleType=4)
@@ -277,8 +295,158 @@ n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按
 > 全部需要登录（Sa-Token），**仅 roleType=1（管理员）可访问**，非管理员返回 403
 
 
-## 十一、管理员 API 对接指南 ← 前端同事看这里
-n## 十B、学生端
+## 十一、题库 & 知识点 API 对接指南 ← 前端同事看这里
+
+> **后端状态**: ✅ 已全部实现 · 数据库表: `knowledge_points` + `question_bank`  
+> **测试数据**: 13个知识点 + 4道新题 + 2道错题（已就绪）  
+> **认证**: 老师端需 roleType=3，学生端需 roleType=4
+
+### 11.1 知识点 API（全老师共享，增删改全平台生效）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/knowledge-points?subject=math&gradeLevel=初三·上学期&page=1&pageSize=15` | 老师端：列表(分页15，按年级筛选) |
+| GET | `/api/v1/knowledge-points?subject=math&grades=初一·上学期,初一·下学期,...&page=1&pageSize=50` | 学生端：多学期批量查询 |
+| POST | `/api/v1/knowledge-points` | 新增知识点 |
+| PUT | `/api/v1/knowledge-points/{id}` | 修改知识点 |
+| DELETE | `/api/v1/knowledge-points/{id}` | 删除知识点 |
+
+**GET 列表响应**（`data` 内）：
+```json
+{
+  "list": [{
+    "id": 1, "subject": "math", "name": "有理数运算",
+    "gradeLevel": "初一·上学期", "parentId": null, "sortOrder": 1,
+    "createdAt": "2026-07-04T17:30:00", "updatedAt": "2026-07-04T17:30:00"
+  }],
+  "total": 13, "page": 1, "pageSize": 15
+}
+```
+
+**POST/PUT 请求体**：
+```json
+{ "name": "勾股定理", "subject": "math", "gradeLevel": "初二·下学期", "parentId": null, "sortOrder": 1 }
+```
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| name | ✅ | 知识点名称（同科目下唯一） |
+| subject | ✅ | 学科（math/chinese/english/...） |
+| gradeLevel | 否 | 年级·学期（如"初三·上学期"） |
+| parentId | 否 | 父知识点ID（树形结构） |
+| sortOrder | 否 | 排序，默认0 |
+
+### 11.2 题库 API（老师端）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/teacher/questions?subject=math&kpId=&type=&studentId=&gradeLevel=&date=&page=1&pageSize=15` | 题库列表(7维筛选+分页) |
+| GET | `/api/v1/teacher/questions/{id}` | 题目详情(含原图/配图/AI解析/老师解析) |
+| PUT | `/api/v1/teacher/questions/{id}` | 更新题目(只传需改字段) |
+| POST | `/api/v1/teacher/questions/upload` | 老师上传新题(全校共享) |
+| DELETE | `/api/v1/teacher/questions/{id}` | 删除题目 |
+
+**GET 列表查询参数**（`subject` 必填，其余可选）：
+
+| 参数 | 类型 | 说明 | 示例 |
+|------|------|------|------|
+| subject | string | 学科（必填） | `math` |
+| kpId | long | 知识点ID（LIKE匹配knowledge_point_ids） | `3` |
+| type | string | 题型 | `WRONG` / `NEW` |
+| studentId | long | 学生ID | `9` |
+| gradeLevel | string | 年级·学期 | `初三·上学期` |
+| date | string | 上传日期 | `2026-07-04` |
+| page | int | 页码，默认1 | `1` |
+| pageSize | int | 每页条数，默认15 | `15` |
+
+**GET 列表响应**（`data` 内）：
+```json
+{
+  "list": [{
+    "id": 1, "subject": "math", "type": "NEW", "source": "TEACHER",
+    "studentId": null, "studentName": null,
+    "teacherId": 10, "teacherName": "zsy",
+    "title": "计算：(-3)² + |-5| - 2×(-4)",
+    "knowledgePointIds": "1", "answer": "20",
+    "difficulty": "EASY", "mastery": "UNMASTERED",
+    "gradeLevel": "初一·上学期",
+    "diagramStatus": "NONE",
+    "originalImageUrl": null, "diagramImageUrl": null,
+    "aiExtractedText": null, "analysis": null, "solution": null, "similarJson": null,
+    "teacherAnalysis": null, "teacherAnalysisImage": null,
+    "errorType": null,
+    "createdAt": "2026-07-04T17:30:00", "updatedAt": "2026-07-04T17:30:00"
+  }],
+  "total": 4, "page": 1, "pageSize": 15
+}
+```
+
+**GET 详情响应**：同列表单条格式，含全部字段。
+
+**POST upload 请求体**：
+```json
+{
+  "subject": "math",
+  "title": "题目文字内容",
+  "answer": "正确答案",
+  "knowledgePointIds": "3,7",
+  "difficulty": "MEDIUM",
+  "gradeLevel": "初三·上学期",
+  "originalImageUrl": "/uploads/xxx.png",
+  "diagramImageUrl": "/uploads/diagram_xxx.png",
+  "diagramStatus": "AUTO",
+  "aiExtractedText": "AI识别原始文字",
+  "teacherAnalysis": "老师手写解析",
+  "teacherAnalysisImage": "/uploads/analysis_xxx.png"
+}
+```
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| subject | ✅ | 学科 |
+| title | ✅ | 题目文字 |
+| answer | 否 | 正确答案 |
+| knowledgePointIds | 否 | 关联知识点ID，逗号分隔（如"3,7,12"） |
+| difficulty | 否 | EASY / MEDIUM / HARD，默认MEDIUM |
+| gradeLevel | 否 | 年级·学期 |
+| originalImageUrl | 否 | 原拍照图片URL |
+| diagramImageUrl | 否 | 配图URL |
+| diagramStatus | 否 | NONE / AUTO / MANUAL |
+| teacherAnalysis | 否 | 老师文字解析 |
+| teacherAnalysisImage | 否 | 老师解析配图URL |
+
+**PUT 请求体**：与 POST 类似，但所有字段选填（只传需更新的字段）。额外支持：`mastery`、`analysis`、`solution`、`errorType`。
+
+### 11.3 题库 API（学生端）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/v1/student/questions/wrong?subject=math&page=1&pageSize=15` | 我的错题库 |
+| GET | `/api/v1/student/questions/new?subject=math&gradeLevel=初一·上学期&page=1&pageSize=15` | 待做题（全校新题） |
+
+**响应格式**：与老师端题库列表一致（`QuestionPageVO`）。
+
+### 11.4 前端对接检查清单
+
+1. ✅ **知识点列表** → 老师端调 `GET /api/v1/knowledge-points?subject=math&gradeLevel=初三·上学期`，分页15
+2. ✅ **知识点CRUD** → POST/PUT/DELETE，同科目下 name 唯一
+3. ✅ **学生端知识点** → `GET /api/v1/knowledge-points?subject=math&grades=初一·上学期,初一·下学期`（逗号分隔多学期）
+4. ✅ **题库列表** → `GET /api/v1/teacher/questions?subject=math` + 可选筛选参数，默认分页15
+5. ✅ **题目详情** → `GET /api/v1/teacher/questions/{id}`，含 teacherName + 全部解析字段
+6. ✅ **上传新题** → `POST /api/v1/teacher/questions/upload`，type自动设为NEW，source=TEACHER
+7. ✅ **更新题目** → `PUT /api/v1/teacher/questions/{id}`，只传需改字段（如 knowledgePointIds / teacherAnalysis / diagramImageUrl）
+8. ✅ **学生错题库** → `GET /api/v1/student/questions/wrong?subject=math`，自动取当前学生的错题(type=WRONG)
+9. ✅ **学生待做题** → `GET /api/v1/student/questions/new?subject=math&gradeLevel=`，全校老师上传的NEW题
+
+### 11.5 错误处理
+
+```json
+{ "code": 400, "message": "该学科下已存在同名知识点", "data": null }
+{ "code": 401, "message": "请先登录", "data": null }
+{ "code": 403, "message": "仅教师可访问", "data": null }
+{ "code": 404, "message": "题目不存在", "data": null }
+{ "code": 404, "message": "学生档案不存在，请联系管理员", "data": null }
+```
+
+## 十B、学生端
 
 | 页面 | 路由 | 说明 |
 |------|------|------|
@@ -654,7 +822,7 @@ n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按
 {
   "schedules": [
     {"sessionId": 1, "classDate": "2026-07-03", "startTime": "14", "endTime": "16",
-     "subject": "英语", "teacherName": "王老师", "teacherId": 3}
+      "subject": "英语", "teacherName": "王老师", "teacherId": 3}
   ]
 }
 ```
@@ -779,3 +947,36 @@ n> **orgName 处理**: 前端传机构名称文本, 后端 `organization` 表按
 - 张顺仪，男，初一，夏港中学，剩余 15 课时，报了英语(14次排课) + 数学(1次排课)
 
 以 **coach**（id=2，密码 coach123）登录看到空列表（张顺仪属于 allsub），需自己 POST 添加。
+
+## 十三、老师端数学学科管理 — 对接进度
+
+### 已完成
+
+| 功能 | 前端 | 后端 |
+|------|------|------|
+| 知识点 CRUD | ✅ API调用 | ✅ 4接口全通 |
+| 知识点分页+年级筛选 | ✅ | ✅ |
+| 题库列表(7维筛选) | ✅ API调用 | ✅ |
+| 题目详情弹窗 | ✅ | ✅ GET /teacher/questions/{id} |
+| 题目保存(知识点/解析/配图) | ✅ PUT调用 | ✅ |
+| Canvas画图配图 | ✅ 本地Canvas | — |
+| 年级→知识点联动 | ✅ disabled逻辑 | ✅ |
+| 年级范围(三年级~高三) | ✅ 20学期 | — |
+
+### 待完成
+
+| 功能 | 状态 | 需后端 |
+|------|------|--------|
+| 上传题目 | 🟡 UI就绪·AI模拟 | POST /teacher/questions/upload 已实现,前端未调真实API |
+| 学生下拉列表 | 🔴 硬编码3个 | 需 `/admin/teachers/{id}/math-students` 返回该老师报名数学的学生 |
+| 题库学生筛选 | 🟡 下拉已有 | 同上,学生列表需从API获取 |
+| 知识点名称显示(题库表) | ✅ 已用knowledgePointNames | — |
+
+### 后端待实现（仅1个）
+
+```
+GET /api/v1/teacher/math-students
+→ 返回当前老师名下报名了数学科目的学生列表
+→ [{ id:9, name:"白克林", grade:"初三" }, ...]
+```
+
