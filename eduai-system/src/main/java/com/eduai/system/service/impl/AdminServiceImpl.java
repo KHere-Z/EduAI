@@ -1,16 +1,20 @@
 package com.eduai.system.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.eduai.ai.config.DeepSeekConfig;
 import com.eduai.common.BusinessException;
+import com.eduai.common.util.PasswordUtil;
 import com.eduai.security.entity.Organization;
 import com.eduai.security.entity.Teacher;
 import com.eduai.security.entity.User;
 import com.eduai.security.repository.OrganizationRepository;
 import com.eduai.security.repository.TeacherRepository;
 import com.eduai.security.repository.UserRepository;
+import com.eduai.security.service.impl.AuthServiceImpl;
 import com.eduai.system.dto.AdminSettingsDTO;
 import com.eduai.system.dto.AdminStudentDTO;
 import com.eduai.system.dto.AdminTeacherDTO;
+import com.eduai.system.dto.AiModelDTO;
 import com.eduai.system.entity.*;
 import com.eduai.system.repository.*;
 import com.eduai.system.service.AdminService;
@@ -46,7 +50,10 @@ public class AdminServiceImpl implements AdminService {
     private final TeacherStudentRepository teacherStudentRepository;
     private final StudentEnrollmentRepository studentEnrollmentRepository;
     private final StudentSessionRepository studentSessionRepository;
-    private final SystemConfigRepository systemConfigRepository;
+    private final AiConfigRepository aiConfigRepository;
+    private final AiModelRepository aiModelRepository;
+    private final DeepSeekConfig deepSeekConfig;
+    private final QuestionRepository questionRepository;
 
     // ==================== 权限检查 ====================
 
@@ -149,8 +156,9 @@ public class AdminServiceImpl implements AdminService {
                 throw new BusinessException("用户名 " + dto.getUsername() + " 已存在");
             }
             User studentUser = User.builder()
+                    .uid(AuthServiceImpl.generateUid())
                     .username(dto.getUsername())
-                    .password(dto.getPassword() != null ? dto.getPassword() : "123456")
+                    .password(PasswordUtil.encode(dto.getPassword() != null ? dto.getPassword() : "123456"))
                     .realName(dto.getName())
                     .phone(dto.getContact())
                     .roleType(4)
@@ -255,7 +263,8 @@ public class AdminServiceImpl implements AdminService {
         Student student = studentRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "学生不存在"));
 
-        // 级联删除：teacher_student → enrollments → sessions
+        // 级联删除：错题 → teacher_student
+        questionRepository.deleteByStudentId(id);
         List<TeacherStudent> tsList = teacherStudentRepository.findByStudentId(id);
         if (!tsList.isEmpty()) {
             teacherStudentRepository.deleteAll(tsList);
@@ -431,8 +440,9 @@ public class AdminServiceImpl implements AdminService {
 
         // 创建 User
         User user = User.builder()
+                .uid(AuthServiceImpl.generateUid())
                 .username(dto.getUsername())
-                .password(dto.getPassword())
+                .password(PasswordUtil.encode(dto.getPassword()))
                 .realName(dto.getRealName())
                 .phone(dto.getPhone())
                 .email(dto.getEmail())
@@ -475,7 +485,7 @@ public class AdminServiceImpl implements AdminService {
         if (dto.getPhone() != null) user.setPhone(dto.getPhone());
         if (dto.getEmail() != null) user.setEmail(dto.getEmail());
         if (dto.getPassword() != null && !dto.getPassword().isBlank()) {
-            user.setPassword(dto.getPassword());
+            user.setPassword(PasswordUtil.encode(dto.getPassword()));
         }
         if (dto.getUsername() != null && !dto.getUsername().isBlank()
                 && !dto.getUsername().equals(user.getUsername())) {
@@ -547,11 +557,15 @@ public class AdminServiceImpl implements AdminService {
     public AdminScheduleVO listSchedules(Long teacherId, Integer year, Integer month, int page, int pageSize) {
         checkAdmin();
 
+        log.info("[排课查询] teacherId={} year={} month={} page={} pageSize={}",
+                teacherId, year, month, page, pageSize);
+
         List<StudentSession> sessions;
         if (year != null && month != null) {
             YearMonth ym = YearMonth.of(year, month);
             LocalDate start = ym.atDay(1);
             LocalDate end = ym.atEndOfMonth();
+            log.info("[排课查询] 日期范围: {} ~ {}", start, end);
 
             if (teacherId != null) {
                 sessions = studentSessionRepository.findAllSessionsByTeacherAndDateRange(teacherId, start, end);
@@ -572,6 +586,8 @@ public class AdminServiceImpl implements AdminService {
                         .collect(Collectors.toList());
             }
         }
+
+        log.info("[排课查询] 结果: {} 条", sessions.size());
 
         // 批量查询关联信息
         Set<Long> enrollmentIds = sessions.stream()
@@ -676,34 +692,146 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     @Transactional(readOnly = true)
-    public Map<String, String> getSettings() {
+    public Map<String, Object> getSettings() {
         checkAdmin();
+        // 预加载 ai_models → value→name 映射
+        Map<String, String> modelNameMap = aiModelRepository.findAll().stream()
+                .collect(Collectors.toMap(
+                        m -> m.getValue(),
+                        m -> m.getName() != null ? m.getName() : m.getValue(),
+                        (a, b) -> a));
 
-        List<SystemConfig> configs = systemConfigRepository.findAll();
-        return configs.stream()
-                .collect(Collectors.toMap(SystemConfig::getConfigKey, SystemConfig::getConfigValue));
+        // 返回 camelCase 格式，与 AdminSettingsDTO 保持一致
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (AiConfig cfg : aiConfigRepository.findAll()) {
+            String camelKey = snakeToCamel(cfg.getModule()) + "Model";
+            map.put(camelKey, cfg.getModel());
+            // 同时返回模型显示名，方便前端回显
+            String nameKey = snakeToCamel(cfg.getModule()) + "ModelName";
+            map.put(nameKey, modelNameMap.getOrDefault(cfg.getModel(), ""));
+        }
+        return map;
+    }
+
+    /** wrong_analysis → wrongAnalysis */
+    private String snakeToCamel(String snake) {
+        StringBuilder sb = new StringBuilder(snake.length());
+        boolean upper = false;
+        for (char c : snake.toCharArray()) {
+            if (c == '_') {
+                upper = true;
+            } else if (upper) {
+                sb.append(Character.toUpperCase(c));
+                upper = false;
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     @Override
     @Transactional
-    public Map<String, String> updateSettings(AdminSettingsDTO dto) {
+    public Map<String, Object> updateSettings(AdminSettingsDTO dto) {
         checkAdmin();
-
-        applySetting("ai_model", dto.getAiModel());
-        applySetting("ai_api_key", dto.getAiApiKey());
-        applySetting("ai_api_url", dto.getAiApiUrl());
-        applySetting("system_name", dto.getSystemName());
-        applySetting("max_concurrency", dto.getMaxConcurrency());
-
+        if (dto.getWrongAnalysisModel() != null) {
+            upsertModule("wrong_analysis", dto.getWrongAnalysisModel());
+        }
+        if (dto.getExamAnalysisModel() != null) {
+            upsertModule("exam_analysis", dto.getExamAnalysisModel());
+        }
+        aiConfigRepository.flush();
+        deepSeekConfig.refresh();
         return getSettings();
     }
 
-    private void applySetting(String key, String value) {
-        if (value == null) return;
-        SystemConfig config = systemConfigRepository.findByConfigKey(key)
-                .orElseGet(() -> SystemConfig.builder().configKey(key).build());
-        config.setConfigValue(value);
-        systemConfigRepository.save(config);
+    private void upsertModule(String module, String model) {
+        AiConfig cfg = aiConfigRepository.findByModule(module).orElseGet(() -> AiConfig.builder().module(module).build());
+        if (model != null) cfg.setModel(model);
+        aiConfigRepository.save(cfg);
+    }
+
+    // ==================== AI 模型管理 ====================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<AiModelVO> listModels() {
+        checkAdmin();
+        return aiModelRepository.findAll().stream()
+                .map(this::toAiModelVO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public AiModelVO createModel(AiModelDTO dto) {
+        checkAdmin();
+
+        if (aiModelRepository.existsByValue(dto.getValue())) {
+            throw new BusinessException("模型标识 " + dto.getValue() + " 已存在");
+        }
+
+        AiModel model = AiModel.builder()
+                .value(dto.getValue())
+                .name(dto.getName())
+                .description(dto.getDescription())
+                .provider(dto.getProvider())
+                .apiUrl(dto.getApiUrl())
+                .apiKey(dto.getApiKey())
+                .tag(dto.getTag())
+                .build();
+
+        model = aiModelRepository.save(model);
+        log.info("管理员{} 新增AI模型: id={}, value={}, name={}", getCurrentUserId(), model.getId(), model.getValue(), model.getName());
+        return toAiModelVO(model);
+    }
+
+    @Override
+    @Transactional
+    public AiModelVO updateModel(Long id, AiModelDTO dto) {
+        checkAdmin();
+
+        AiModel model = aiModelRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "模型不存在"));
+
+        // 检查 value 唯一性（改了 value 的情况）
+        if (!model.getValue().equals(dto.getValue())
+                && aiModelRepository.existsByValue(dto.getValue())) {
+            throw new BusinessException("模型标识 " + dto.getValue() + " 已存在");
+        }
+
+        model.setValue(dto.getValue());
+        model.setName(dto.getName());
+        model.setDescription(dto.getDescription());
+        model.setProvider(dto.getProvider());
+        model.setApiUrl(dto.getApiUrl());
+        model.setApiKey(dto.getApiKey());
+        model.setTag(dto.getTag());
+
+        model = aiModelRepository.save(model);
+        log.info("管理员{} 更新AI模型: id={}, value={}", getCurrentUserId(), id, dto.getValue());
+        return toAiModelVO(model);
+    }
+
+    @Override
+    @Transactional
+    public void deleteModel(Long id) {
+        checkAdmin();
+
+        AiModel model = aiModelRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "模型不存在"));
+
+        // 检查是否有 ai_config 引用此模型
+        List<AiConfig> refs = aiConfigRepository.findAll().stream()
+                .filter(c -> model.getValue().equals(c.getModel()))
+                .collect(Collectors.toList());
+        if (!refs.isEmpty()) {
+            String modules = refs.stream().map(AiConfig::getModule).collect(Collectors.joining(", "));
+            throw new BusinessException("该模型正被以下功能使用，请先切换到其他模型: " + modules);
+        }
+
+        aiModelRepository.delete(model);
+        log.info("管理员{} 删除AI模型: id={}, value={}, name={}", getCurrentUserId(), id, model.getValue(), model.getName());
     }
 
     // ==================== 内部辅助方法 ====================
@@ -813,6 +941,22 @@ public class AdminServiceImpl implements AdminService {
             return org.getId();
         }
         return dto.getOrgId();
+    }
+
+    /** AiModel → AiModelVO */
+    private AiModelVO toAiModelVO(AiModel m) {
+        return AiModelVO.builder()
+                .id(m.getId())
+                .value(m.getValue())
+                .name(m.getName())
+                .description(m.getDescription())
+                .provider(m.getProvider())
+                .apiUrl(m.getApiUrl())
+                .apiKey(m.getApiKey())
+                .tag(m.getTag())
+                .createdAt(m.getCreatedAt())
+                .updatedAt(m.getUpdatedAt())
+                .build();
     }
 
     /** "math,physics" → ["math", "physics"] */

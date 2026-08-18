@@ -17,13 +17,18 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByUsername(String username);
 
-    /**
-     * 按角色类型查询用户列表
-     */
+    /** 按 uid 查找 */
+    Optional<User> findByUid(Long uid);
+
+    /** 按手机号查找 */
+    Optional<User> findByPhone(String phone);
+
+    /** 手机号是否已存在 */
+    boolean existsByPhone(String phone);
+
+    /** 按角色类型查询用户列表 */
     List<User> findByRoleType(Integer roleType);
 
-    /**
-     * 按角色类型统计用户数
-     */
+    /** 按角色类型统计用户数 */
     long countByRoleType(Integer roleType);
 }

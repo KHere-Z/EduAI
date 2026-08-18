@@ -47,6 +47,10 @@ public class Student {
     @Column(name = "user_id")
     private Long userId;
 
+    /** 学科列表 JSON（如 ["数学","英语"]），以用户个人中心修改为准 */
+    @Column(columnDefinition = "JSON")
+    private String subjects;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

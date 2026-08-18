@@ -45,12 +45,12 @@ public class Question {
 
     // ==================== 图片相关 ====================
 
-    /** 原上传图片URL */
-    @Column(name = "original_image_url", length = 500)
+    /** 原上传图片URL/base64 */
+    @Column(name = "original_image_url", columnDefinition = "MEDIUMTEXT")
     private String originalImageUrl;
 
-    /** 配图（AI截取/老师手动上传/画图） */
-    @Column(name = "diagram_image_url", length = 500)
+    /** 配图（AI截取/老师手动上传/画图，支持 base64 data URL） */
+    @Column(name = "diagram_image_url", columnDefinition = "MEDIUMTEXT")
     private String diagramImageUrl;
 
     /** 配图状态：NONE / AUTO / MANUAL */
@@ -95,8 +95,8 @@ public class Question {
     @Column(name = "teacher_analysis", columnDefinition = "TEXT")
     private String teacherAnalysis;
 
-    /** 老师解析配图（PNG/JPG本地文件路径） */
-    @Column(name = "teacher_analysis_image", length = 500)
+    /** 老师解析配图（URL 或 base64 data URL） */
+    @Column(name = "teacher_analysis_image", columnDefinition = "MEDIUMTEXT")
     private String teacherAnalysisImage;
 
     /** 文件类型（image/png 或 image/jpeg） */
@@ -112,6 +112,19 @@ public class Question {
     /** 掌握度：UNMASTERED / FAMILIAR / MASTERED */
     @Column(length = 20)
     private String mastery;
+
+    /** 是否完成：0=未完成 / 1=已完成 */
+    @Column(nullable = false)
+    private Boolean completed = false;
+
+    /** 题型：选择题/填空题/计算题/解答题 */
+    @Column(name = "question_type", length = 10)
+    private String questionType;
+
+    /** 1=共享公域 0=私域（仅上传者及关联学生可见） */
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean shared = true;
 
     /** 错误类型（错题） */
     @Column(name = "error_type", length = 50)

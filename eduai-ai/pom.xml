@@ -9,5 +9,28 @@
         <version>1.0.0-SNAPSHOT</version>
     </parent>
     <artifactId>eduai-ai</artifactId>
-    <name>EduAI ai</name>
+    <name>EduAI AI (DeepSeek 接入)</name>
+
+    <dependencies>
+        <!-- 公共模块（Result, BusinessException） -->
+        <dependency>
+            <groupId>com.eduai</groupId>
+            <artifactId>eduai-common</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- OkHttp 用于 DeepSeek API 调用 -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>4.12.0</version>
+        </dependency>
+
+        <!-- 认证模块（智学点消费） -->
+        <dependency>
+            <groupId>com.eduai</groupId>
+            <artifactId>eduai-security</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+    </dependencies>
 </project>

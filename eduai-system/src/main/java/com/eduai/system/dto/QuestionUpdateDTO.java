@@ -41,6 +41,9 @@ public class QuestionUpdateDTO {
     /** 掌握度：UNMASTERED / FAMILIAR / MASTERED */
     private String mastery;
 
+    /** 是否完成：0=未完成 / 1=已完成 */
+    private Boolean completed;
+
     /** AI错因分析 */
     private String analysis;
 
@@ -49,4 +52,10 @@ public class QuestionUpdateDTO {
 
     /** 错误类型 */
     private String errorType;
+
+    /** 题型 */
+    private String questionType;
+
+    /** 共享/私域 */
+    private Boolean shared;
 }

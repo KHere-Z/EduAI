@@ -12,10 +12,18 @@
     <name>EduAI security</name>
 
     <dependencies>
+        <!-- eduai-common 提供 Result、BusinessException 等公共组件 -->
         <dependency>
             <groupId>com.eduai</groupId>
             <artifactId>eduai-common</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.data</groupId>
+            <artifactId>spring-data-jpa</artifactId>
+        </dependency>
+
+        <!-- 以下依赖由父 POM 统一管理版本，子模块自动继承：
+             spring-boot-starter-web / spring-boot-starter-data-jpa / hutool-all / lombok 等 -->
     </dependencies>
 </project>

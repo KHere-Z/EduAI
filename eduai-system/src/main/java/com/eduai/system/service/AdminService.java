@@ -3,8 +3,10 @@ package com.eduai.system.service;
 import com.eduai.system.dto.AdminSettingsDTO;
 import com.eduai.system.dto.AdminStudentDTO;
 import com.eduai.system.dto.AdminTeacherDTO;
+import com.eduai.system.dto.AiModelDTO;
 import com.eduai.system.vo.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -78,12 +80,34 @@ public interface AdminService {
     // ==================== 系统设置 ====================
 
     /**
-     * 获取当前配置
+     * 获取当前配置（camelCase key，与 AdminSettingsDTO 一致）
      */
-    Map<String, String> getSettings();
+    Map<String, Object> getSettings();
 
     /**
      * 更新配置
      */
-    Map<String, String> updateSettings(AdminSettingsDTO dto);
+    Map<String, Object> updateSettings(AdminSettingsDTO dto);
+
+    // ==================== AI 模型管理 ====================
+
+    /**
+     * 模型列表
+     */
+    List<AiModelVO> listModels();
+
+    /**
+     * 新增模型
+     */
+    AiModelVO createModel(AiModelDTO dto);
+
+    /**
+     * 更新模型
+     */
+    AiModelVO updateModel(Long id, AiModelDTO dto);
+
+    /**
+     * 删除模型
+     */
+    void deleteModel(Long id);
 }

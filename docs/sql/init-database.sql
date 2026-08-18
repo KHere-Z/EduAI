@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS `organization` (
 CREATE TABLE IF NOT EXISTS `users` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '主键',
     `username`    VARCHAR(50)  NOT NULL COMMENT '用户名',
-    `password`    VARCHAR(200) NOT NULL COMMENT '密码（明文）',
+    `password`    VARCHAR(200) NOT NULL COMMENT '密码（BCrypt 哈希）',
     `real_name`   VARCHAR(50)  COMMENT '真实姓名',
     `phone`       VARCHAR(20)  COMMENT '手机号',
     `email`       VARCHAR(100) COMMENT '邮箱',
@@ -69,17 +69,17 @@ CREATE TABLE IF NOT EXISTS `teachers` (
 -- 机构
 INSERT INTO `organization` (`id`, `name`, `type`) VALUES (1, '第一实验中学', 1);
 
--- 管理员 (密码: admin123，明文)
+-- 管理员 (登录密码: admin123，存储为 BCrypt 哈希)
 INSERT INTO `users` (`id`, `username`, `password`, `real_name`, `role_type`, `status`) VALUES
-(1, 'admin', 'admin123', '系统管理员', 1, 1);
+(1, 'admin', '$2a$10$6DPe6o/Q4K.Z9eRC9/sgveLO.Kjff8vK9yCiXgppdeTnKA/wfBVc2', '系统管理员', 1, 1);
 
--- 教师 (密码均为用户名+123，明文)
+-- 教师 (登录密码均为用户名+123，存储为 BCrypt 哈希)
 INSERT INTO `users` (`id`, `username`, `password`, `real_name`, `role_type`, `status`) VALUES
-(2, 'coach',  'coach123',   '李老师', 3, 1),
-(3, 'english','english123', '王老师', 3, 1),
-(4, 'math',   'math123',    '张老师', 3, 1),
-(5, 'multi',  'multi123',   '陈老师', 3, 1),
-(6, 'allsub', 'allsub123',  '赵老师', 3, 1);
+(2, 'coach',  '$2a$10$6HgbXEq2.XXXfq63tXgcWO8rR/2V/n2tAF8K8fu2wK37iO6PK5lCC', '李老师', 3, 1),
+(3, 'english','$2a$10$uiQZRy1A3kzjVfYRDm95f.3iVLp2dZehTTpubNLXB8yALsAnyq6/S', '王老师', 3, 1),
+(4, 'math',   '$2a$10$XiY90QIL/hTbqPlt7ap3SuTMya3/6fhXmWAsUQ3xHZBBj6l3NnhG2', '张老师', 3, 1),
+(5, 'multi',  '$2a$10$/e9EW2Dm1PD.HyWg2jlOVeYNO40IhDYUonw1er2UXtjii4o1bWrgu', '陈老师', 3, 1),
+(6, 'allsub', '$2a$10$j4lBAt/F6ToqGi7UVZMoDOAr74Qo89P3umN4hI/zZcXQJP6BfD9Zi', '赵老师', 3, 1);
 
 -- 教师信息
 INSERT INTO `teachers` (`id`, `user_id`, `subject_ids`, `org_id`, `title`) VALUES
@@ -144,20 +144,19 @@ CREATE TABLE IF NOT EXISTS `student_session` (
     CONSTRAINT `fk_session_enrollment` FOREIGN KEY (`enrollment_id`) REFERENCES `student_enrollment`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='上课时间';
 
--- 测试数据: allsub(teacher_id=6) 添加张顺仪(英语+数学)
-INSERT INTO `students` (`id`, `name`, `gender`, `contact`, `grade`, `school`) VALUES
-(1, '张三', '男', '13800001111', '初一', '第一实验中学');
+-- 学生打卡记录表
+CREATE TABLE IF NOT EXISTS `student_checkin` (
+    `id`           BIGINT NOT NULL AUTO_INCREMENT COMMENT '主键',
+    `student_id`   BIGINT NOT NULL COMMENT '学生ID（→ students.id）',
+    `checkin_date` DATE   NOT NULL COMMENT '打卡日期',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_sc_student_date` (`student_id`, `checkin_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生打卡记录';
 
-INSERT INTO `teacher_student` (`id`, `teacher_id`, `student_id`, `hours_left`, `reg_date`) VALUES
-(1, 6, 1, 15, '2026-03-15');
 
-INSERT INTO `student_enrollment` (`id`, `teacher_student_id`, `subject`) VALUES
-(1, 1, '英语'), (2, 1, '数学');
-
-INSERT INTO `student_session` (`enrollment_id`, `class_date`, `start_time`, `end_time`) VALUES
-(1, '2026-07-03', '14', '16'),
-(1, '2026-07-05', '14', '16'),
-(2, '2026-07-03', '10', '12');
+INSERT INTO `users` (`username`, `password`, `real_name`, `role_type`, `status`)
+VALUES ('zhixueMa', '20260818', '智学管理员', 1, 1);
+UPDATE `users` SET `password` = '20250423' WHERE `username` = 'zhangshunyi';
 
 
 

@@ -1,30 +1,55 @@
 server:
   port: 8080
+  shutdown: graceful             # 优雅停机，等待请求处理完
+  compression:
+    enabled: true                # gzip 压缩
+    mime-types: application/json,text/plain,text/html,text/xml
+    min-response-size: 1024      # 超过 1KB 才压缩
   servlet:
     encoding:
       charset: UTF-8
       enabled: true
       force: true       # 强制请求也用 UTF-8 解码（修复前端 GBK 请求 500 问题）
+  # ==================== Tomcat 线程池 ====================
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10
+    max-connections: 8192
+    accept-count: 100
+    connection-timeout: 30000
 
 
 spring:
   application:
     name: eduai-server
   profiles:
-    active: dev
+    # 生产部署必须显式设置 SPRING_PROFILES_ACTIVE=prod（或 -Dspring.profiles.active=prod），否则默认 dev
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  lifecycle:
+    timeout-per-shutdown-phase: 30s    # 优雅停机最长等待 30 秒
+
+  # ==================== MVC 异步请求超时 ====================
+  # 非流式 AI 端点（/ai/chat、/ai/wrong-analysis、/ai/exam-analysis）返回 CompletableFuture，
+  # 会被包装成 DeferredResult，未显式设超时则回落到此值；缺省走 Tomcat 容器默认 30 秒，
+  # 对 5-10 分钟的试卷分析太短，调大到 20 分钟
+  mvc:
+    async:
+      request-timeout: 1200000
 
   # ==================== 数据库配置 ====================
+  # 生产/无 profile 环境必须通过环境变量注入真实凭据；开发环境由 application-dev.yml 提供默认值
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/eduai?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
-    username: root
-    password: root
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     # HikariCP 连接池（Spring Boot 3.x 默认）
     hikari:
-      maximum-pool-size: 20          # 最大连接数
-      minimum-idle: 5                # 最小空闲连接
+      maximum-pool-size: 50          # 最大连接数（5000 并发 + 慢查询缓冲；勿超 MySQL max_connections）
+      minimum-idle: 10               # 最小空闲连接（预热，降低冷启动获取连接延迟）
       idle-timeout: 300000           # 空闲超时 5分钟
-      connection-timeout: 20000      # 连接等待超时 10秒
+      connection-timeout: 20000      # 获取连接等待超时 20秒
       max-lifetime: 1200000          # 连接最大存活 20分钟
       leak-detection-threshold: 60000 # 连接泄露检测 60秒
       pool-name: EduAI-HikariPool
@@ -32,7 +57,7 @@ spring:
   # JPA / Hibernate 配置
   jpa:
     hibernate:
-      ddl-auto: update                          # 开发: update / 生产: validate
+      ddl-auto: validate                        # 安全默认：仅校验表结构；开发由 application-dev.yml 覆盖为 update
     show-sql: false                             # 控制台打印 SQL
     open-in-view: false                         # 禁用 OSIV
     properties:
@@ -51,6 +76,25 @@ spring:
     redis:
       host: localhost
       port: 6379
+      timeout: 5000ms
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+
+  # 文件上传限制
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
+
+  # 静态资源映射（上传文件访问）
+  web:
+    resources:
+      static-locations: classpath:/static/,file:./uploads/
 
 # Sa-Token 认证配置
 sa-token:
@@ -62,15 +106,66 @@ sa-token:
   is-share: true
   token-style: tik
   is-log: false
+  # Redis 会话共享（多实例部署时启用）
+  alone-redis:
+    database: 1
+    timeout: 3000ms
 
-# Knife4j API 文档
+# Knife4j API 文档（生产默认关闭；开发由 application-dev.yml 开启）
 knife4j:
-  enable: true
+  enable: false
   setting:
     language: zh_cn
 
-# 日志
+# 上传文件配置
+eduai:
+  upload:
+    dir: uploads
+  # ==================== 支付配置（真实 SDK 接入预留） ====================
+  # 开发环境 channel=mock；生产接入真实支付宝/微信时改为 alipay/wechat 并填充凭证。
+  # 凭证务必通过环境变量注入，勿硬编码进配置文件。
+  payment:
+    channel: ${PAYMENT_CHANNEL:mock}     # mock / alipay / wechat
+    alipay:
+      app-id: ${ALIPAY_APP_ID:}
+      private-key: ${ALIPAY_PRIVATE_KEY:}
+      alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+      gateway: https://openapi.alipay.com/gateway.do
+      notify-url: ${ALIPAY_NOTIFY_URL:}
+    wechat:
+      app-id: ${WECHAT_APP_ID:}
+      mch-id: ${WECHAT_MCH_ID:}
+      api-v3-key: ${WECHAT_API_V3_KEY:}
+      cert-serial-no: ${WECHAT_CERT_SERIAL_NO:}
+      private-key-path: ${WECHAT_PRIVATE_KEY_PATH:}
+      notify-url: ${WECHAT_NOTIFY_URL:}
+  # ==================== AI 密钥（环境变量注入，勿硬编码） ====================
+  ai:
+    deepseek-api-key: ${DEEPSEEK_API_KEY:}
+    doubao-api-key: ${DOUBAO_API_KEY:}
+
+# ==================== 腾讯云短信配置 ====================
+# 开发环境不配置密钥时自动启用 Mock 短信（控制台打印验证码）
+sms:
+  tencent:
+    secret-id: ${SMS_SECRET_ID:}
+    secret-key: ${SMS_SECRET_KEY:}
+    sdk-app-id: ${SMS_APP_ID:}
+    sign-name: EduAI
+    template-id: ${SMS_TEMPLATE_ID:}
+
+# 日志（生产默认 info；开发由 application-dev.yml 覆盖为 debug）
 logging:
   level:
-    com.eduai: debug
+    com.eduai: info
     org.springframework: warn
+
+# ==================== Actuator 监控 ====================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info        # 安全默认：仅暴露健康检查
+  endpoint:
+    health:
+      show-details: never

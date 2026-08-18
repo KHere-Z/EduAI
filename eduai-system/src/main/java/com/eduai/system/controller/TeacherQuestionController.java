@@ -35,10 +35,11 @@ public class TeacherQuestionController {
             @RequestParam(required = false) Long studentId,
             @RequestParam(required = false) String gradeLevel,
             @RequestParam(required = false) String date,
+            @RequestParam(required = false) String questionType,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "15") int pageSize) {
         return Result.ok(questionBankService.listTeacherQuestions(
-                page, pageSize, subject, kpId, type, studentId, gradeLevel, date));
+                page, pageSize, subject, kpId, type, studentId, gradeLevel, date, questionType));
     }
 
     /**

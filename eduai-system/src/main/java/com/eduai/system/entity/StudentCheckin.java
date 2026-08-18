@@ -16,7 +16,7 @@ import java.time.LocalDate;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Table(name = "student_checkin")
+@Table(name = "student_checkin", uniqueConstraints = @UniqueConstraint(columnNames = {"student_id", "checkin_date"}))
 public class StudentCheckin {
 
     @Id

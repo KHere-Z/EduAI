@@ -7,14 +7,19 @@ import com.eduai.security.repository.UserRepository;
 import com.eduai.system.dto.QuestionUpdateDTO;
 import com.eduai.system.dto.QuestionUploadDTO;
 import com.eduai.system.entity.Question;
+import com.eduai.system.entity.QuestionKnowledgePoint;
 import com.eduai.system.entity.Student;
 import com.eduai.system.entity.StudentEnrollment;
+import com.eduai.system.entity.StudentQuestionProgress;
 import com.eduai.system.entity.TeacherStudent;
 import com.eduai.system.repository.KnowledgePointRepository;
+import com.eduai.system.repository.QuestionKnowledgePointRepository;
 import com.eduai.system.repository.QuestionRepository;
 import com.eduai.system.repository.StudentEnrollmentRepository;
+import com.eduai.system.repository.StudentQuestionProgressRepository;
 import com.eduai.system.repository.StudentRepository;
 import com.eduai.system.repository.TeacherStudentRepository;
+import com.eduai.system.service.ImageStorageService;
 import com.eduai.system.service.QuestionBankService;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
@@ -44,11 +49,14 @@ import java.util.stream.Collectors;
 public class QuestionBankServiceImpl implements QuestionBankService {
 
     private final QuestionRepository questionRepository;
+    private final QuestionKnowledgePointRepository questionKnowledgePointRepository;
     private final StudentRepository studentRepository;
     private final UserRepository userRepository;
     private final KnowledgePointRepository knowledgePointRepository;
     private final TeacherStudentRepository teacherStudentRepository;
     private final StudentEnrollmentRepository studentEnrollmentRepository;
+    private final StudentQuestionProgressRepository studentQuestionProgressRepository;
+    private final ImageStorageService imageStorageService;
 
     /** 校验当前用户是否为教师（roleType=3） */
     private void checkTeacher() {
@@ -84,10 +92,15 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     @Transactional(readOnly = true)
     public QuestionPageVO listTeacherQuestions(int page, int pageSize, String subject,
                                                Long kpId, String type, Long studentId,
-                                               String gradeLevel, String date) {
+                                               String gradeLevel, String date,
+                                               String questionType) {
         checkTeacher();
 
-        Specification<Question> spec = buildTeacherQuestionSpec(subject, kpId, type, studentId, gradeLevel, date);
+        // 知识点筛选：提前从中间表取题目ID，避免 CSV 列 LIKE 全表扫描
+        List<Long> kpQuestionIds = kpId != null
+                ? questionKnowledgePointRepository.findQuestionIdsByKnowledgePointId(kpId)
+                : null;
+        Specification<Question> spec = buildTeacherQuestionSpec(subject, kpQuestionIds, type, studentId, gradeLevel, date, questionType);
         Pageable pageable = PageRequest.of(page - 1, pageSize, Sort.by(Sort.Direction.DESC, "id"));
         Page<Question> questionPage = questionRepository.findAll(spec, pageable);
 
@@ -130,9 +143,14 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     @Transactional(readOnly = true)
     public QuestionVO getQuestion(Long id) {
         checkTeacher();
+        Long teacherId = getCurrentUserId();
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+        // 私域题仅上传老师可见；共享题所有老师可见
+        if (!Boolean.TRUE.equals(q.getShared()) && !teacherId.equals(q.getTeacherId())) {
+            throw new BusinessException(403, "无权访问他人私域题目");
+        }
 
         Map<Long, String> studentNameMap = Collections.emptyMap();
         if (q.getStudentId() != null) {
@@ -156,25 +174,36 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     @Transactional
     public QuestionVO updateQuestion(Long id, QuestionUpdateDTO dto) {
         checkTeacher();
+        Long teacherId = getCurrentUserId();
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+        // 新题(teacherId 非空)仅上传老师可改；错题(teacherId 空)为共享批改
+        if (q.getTeacherId() != null && !q.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(403, "无权修改他人题目");
+        }
 
         // 只更新非null字段
         if (dto.getTitle() != null) q.setTitle(dto.getTitle());
         if (dto.getAnswer() != null) q.setAnswer(dto.getAnswer());
-        if (dto.getKnowledgePointIds() != null) q.setKnowledgePointIds(dto.getKnowledgePointIds());
+        if (dto.getKnowledgePointIds() != null) {
+            q.setKnowledgePointIds(dto.getKnowledgePointIds());
+            replaceKnowledgePointLinks(id, dto.getKnowledgePointIds());
+        }
         if (dto.getDifficulty() != null) q.setDifficulty(dto.getDifficulty());
         if (dto.getGradeLevel() != null) q.setGradeLevel(dto.getGradeLevel());
-        if (dto.getDiagramImageUrl() != null) q.setDiagramImageUrl(dto.getDiagramImageUrl());
+        if (dto.getDiagramImageUrl() != null) q.setDiagramImageUrl(imageStorageService.persistIfBase64(dto.getDiagramImageUrl(), "diagram"));
         if (dto.getDiagramStatus() != null) q.setDiagramStatus(dto.getDiagramStatus());
         if (dto.getTeacherAnalysis() != null) q.setTeacherAnalysis(dto.getTeacherAnalysis());
-        if (dto.getTeacherAnalysisImage() != null) q.setTeacherAnalysisImage(dto.getTeacherAnalysisImage());
+        if (dto.getTeacherAnalysisImage() != null) q.setTeacherAnalysisImage(imageStorageService.persistIfBase64(dto.getTeacherAnalysisImage(), "analysis"));
         if (dto.getTeacherAnalysisImageType() != null) q.setTeacherAnalysisImageType(dto.getTeacherAnalysisImageType());
         if (dto.getMastery() != null) q.setMastery(dto.getMastery());
+        if (dto.getCompleted() != null) q.setCompleted(dto.getCompleted());
         if (dto.getAnalysis() != null) q.setAnalysis(dto.getAnalysis());
         if (dto.getSolution() != null) q.setSolution(dto.getSolution());
         if (dto.getErrorType() != null) q.setErrorType(dto.getErrorType());
+        if (dto.getQuestionType() != null) q.setQuestionType(dto.getQuestionType());
+        if (dto.getShared() != null) q.setShared(dto.getShared());
 
         q = questionRepository.save(q);
         log.info("教师{} 更新题目: id={}", getCurrentUserId(), id);
@@ -198,17 +227,20 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .knowledgePointIds(dto.getKnowledgePointIds())
                 .difficulty(dto.getDifficulty())
                 .gradeLevel(dto.getGradeLevel())
-                .originalImageUrl(dto.getOriginalImageUrl())
-                .diagramImageUrl(dto.getDiagramImageUrl())
+                .originalImageUrl(imageStorageService.persistIfBase64(dto.getOriginalImageUrl(), "original"))
+                .diagramImageUrl(imageStorageService.persistIfBase64(dto.getDiagramImageUrl(), "diagram"))
                 .diagramStatus(dto.getDiagramStatus() != null ? dto.getDiagramStatus() : "NONE")
                 .aiExtractedText(dto.getAiExtractedText())
                 .teacherAnalysis(dto.getTeacherAnalysis())
-                .teacherAnalysisImage(dto.getTeacherAnalysisImage())
+                .teacherAnalysisImage(imageStorageService.persistIfBase64(dto.getTeacherAnalysisImage(), "analysis"))
                 .teacherAnalysisImageType(dto.getTeacherAnalysisImageType())
+                .questionType(dto.getQuestionType())
+                .shared(dto.getShared() != null ? dto.getShared() : true)
                 .mastery("UNMASTERED")
                 .build();
 
         q = questionRepository.save(q);
+        replaceKnowledgePointLinks(q.getId(), dto.getKnowledgePointIds());
         log.info("教师{} 上传新题: id={}, subject={}, title={}", teacherId, q.getId(), q.getSubject(),
                 q.getTitle().length() > 30 ? q.getTitle().substring(0, 30) + "..." : q.getTitle());
 
@@ -273,12 +305,17 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     @Transactional
     public void deleteQuestion(Long id) {
         checkTeacher();
+        Long teacherId = getCurrentUserId();
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+        // 新题(teacherId 非空)仅上传老师可删；错题(teacherId 空)为共享批改
+        if (q.getTeacherId() != null && !q.getTeacherId().equals(teacherId)) {
+            throw new BusinessException(403, "无权删除他人题目");
+        }
 
         questionRepository.delete(q);
-        log.info("教师{} 删除题目: id={}", getCurrentUserId(), id);
+        log.info("教师{} 删除题目: id={}", teacherId, id);
     }
 
     // ==================== 学生端 ====================
@@ -314,7 +351,8 @@ public class QuestionBankServiceImpl implements QuestionBankService {
 
     @Override
     @Transactional(readOnly = true)
-    public QuestionPageVO listStudentNewQuestions(int page, int pageSize, String subject, String gradeLevel) {
+    public QuestionPageVO listStudentNewQuestions(int page, int pageSize, String subject,
+                                                   String gradeLevel, String questionType) {
         Student student = checkStudent();
 
         // 未传 gradeLevel 时，自动从学生档案读取年级
@@ -322,25 +360,64 @@ public class QuestionBankServiceImpl implements QuestionBankService {
             gradeLevel = student.getGrade();
         }
 
+        // 解析逗号分隔的年级列表
+        List<String> gradeList = new ArrayList<>();
+        if (gradeLevel != null && !gradeLevel.isBlank()) {
+            for (String g : gradeLevel.split(",")) {
+                String trimmed = g.trim();
+                if (!trimmed.isEmpty()) {
+                    gradeList.add(trimmed);
+                }
+            }
+        }
+
+        // 获取学生的老师ID列表（用于私域题目可见性）
+        List<Long> teacherUserIds = new ArrayList<>();
+        try {
+            teacherUserIds = teacherStudentRepository.findByStudentId(student.getId())
+                    .stream().map(com.eduai.system.entity.TeacherStudent::getTeacherId).toList();
+        } catch (Exception ignored) {}
+
+        List<Long> finalTeacherUserIds = teacherUserIds;
         Pageable pageable = PageRequest.of(page - 1, pageSize, Sort.by(Sort.Direction.DESC, "id"));
 
-        // 前缀匹配：学生 grade="初一" 能命中 grade_level="初一·上学期"/"初一·下学期"
-        final String finalGradeLevel = gradeLevel;
         Specification<Question> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
             predicates.add(cb.equal(root.get("type"), "NEW"));
             predicates.add(cb.equal(root.get("subject"), subject));
-            if (finalGradeLevel != null && !finalGradeLevel.isBlank()) {
-                predicates.add(cb.like(root.get("gradeLevel"), finalGradeLevel + "%"));
+
+            if (!gradeList.isEmpty()) {
+                Predicate gradeIn = root.get("gradeLevel").in(gradeList);
+                Predicate gradeNull = cb.isNull(root.get("gradeLevel"));
+                Predicate gradeEmpty = cb.equal(root.get("gradeLevel"), "");
+                predicates.add(cb.or(gradeIn, gradeNull, gradeEmpty));
             }
+
+            // 题型筛选
+            if (questionType != null && !questionType.isBlank()) {
+                predicates.add(cb.equal(root.get("questionType"), questionType));
+            }
+
+            // 私域隔离：公域 OR 关联老师的私域题
+            Predicate sharedTrue = cb.equal(root.get("shared"), true);
+            if (!finalTeacherUserIds.isEmpty()) {
+                Predicate fromMyTeacher = root.get("teacherId").in(finalTeacherUserIds);
+                predicates.add(cb.or(sharedTrue, fromMyTeacher));
+            } else {
+                predicates.add(sharedTrue);
+            }
+
             return cb.and(predicates.toArray(new Predicate[0]));
         };
         Page<Question> questionPage = questionRepository.findAll(spec, pageable);
+        log.info("学生新题查询: subject={}, gradeList={}, 结果={}条", subject, gradeList, questionPage.getTotalElements());
 
         Map<Long, String> kpNameMap = resolveKpNameMap(questionPage.getContent());
         List<QuestionVO> list = questionPage.getContent().stream()
                 .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap))
                 .collect(Collectors.toList());
+        // 共享新题的掌握度/完成状态按学生隔离，覆盖当前学生进度
+        overlayProgress(list, student.getId());
 
         return QuestionPageVO.builder()
                 .list(list)
@@ -355,17 +432,22 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     /**
      * 构建老师端题目动态查询条件（7维筛选）
      */
-    private Specification<Question> buildTeacherQuestionSpec(String subject, Long kpId, String type,
-                                                              Long studentId, String gradeLevel, String date) {
+    private Specification<Question> buildTeacherQuestionSpec(String subject, List<Long> kpQuestionIds, String type,
+                                                              Long studentId, String gradeLevel, String date,
+                                                              String questionType) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             // 学科筛选（必填）
             predicates.add(cb.equal(root.get("subject"), subject));
 
-            // 知识点筛选（knowledge_point_ids 是逗号分隔的字符串，用 LIKE 查询）
-            if (kpId != null) {
-                predicates.add(cb.like(root.get("knowledgePointIds"), "%" + kpId + "%"));
+            // 知识点筛选：走 question_knowledge_point 中间表（索引精确匹配，消除前缀歧义）
+            if (kpQuestionIds != null) {
+                if (kpQuestionIds.isEmpty()) {
+                    predicates.add(cb.disjunction()); // 该知识点无题 → 返回空
+                } else {
+                    predicates.add(root.get("id").in(kpQuestionIds));
+                }
             }
 
             // 类型筛选：WRONG / NEW
@@ -378,21 +460,33 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 predicates.add(cb.equal(root.get("studentId"), studentId));
             }
 
-            // 年级筛选（前缀匹配："初一" 命中 "初一·上学期"/"初一·下学期"）
+            // 年级筛选
             if (gradeLevel != null && !gradeLevel.isBlank() && !"all".equals(gradeLevel)) {
                 predicates.add(cb.like(root.get("gradeLevel"), gradeLevel + "%"));
             }
 
-            // 日期筛选（按 created_at 过滤）
+            // 日期筛选
             if (date != null && !date.isBlank()) {
                 try {
                     LocalDate localDate = LocalDate.parse(date, DateTimeFormatter.ISO_LOCAL_DATE);
                     predicates.add(cb.equal(root.get("createdAt").as(LocalDate.class), localDate));
                 } catch (Exception e) {
-                    // 日期格式错误，忽略此条件
                     log.warn("日期格式错误: {}", date);
                 }
             }
+
+            // 题型筛选
+            if (questionType != null && !questionType.isBlank()) {
+                predicates.add(cb.equal(root.get("questionType"), questionType));
+            }
+
+            // 权限隔离：老师只能看公域题目 + 自己的私域题目
+            Long currentTeacherId = getCurrentUserId();
+            Predicate sharedOr = cb.or(
+                    cb.equal(root.get("shared"), true),
+                    cb.equal(root.get("teacherId"), currentTeacherId)
+            );
+            predicates.add(sharedOr);
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -464,10 +558,189 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .teacherAnalysisImageType(q.getTeacherAnalysisImageType())
                 .difficulty(q.getDifficulty())
                 .mastery(q.getMastery())
+                .completed(q.getCompleted())
+                .questionType(q.getQuestionType())
+                .shared(q.getShared())
                 .errorType(q.getErrorType())
                 .gradeLevel(q.getGradeLevel())
                 .createdAt(q.getCreatedAt())
                 .updatedAt(q.getUpdatedAt())
                 .build();
+    }
+
+    // ==================== 学生错题录入 ====================
+
+    @Override
+    @Transactional
+    public QuestionVO addWrongQuestion(String subject, Map<String, Object> body) {
+        Student student = checkStudent();
+
+        Question q = new Question();
+        q.setSubject(subject);
+        q.setType("WRONG");
+        q.setSource("STUDENT");
+        q.setStudentId(student.getId());
+        q.setTitle((String) body.get("title"));
+        q.setKnowledgePointIds(null); // 待老师标识
+        q.setDifficulty(getString(body, "difficulty", "MEDIUM"));
+        q.setGradeLevel(getString(body, "gradeLevel", ""));
+        q.setAnalysis((String) body.get("analysis"));
+        q.setSolution(getString(body, "solution", ""));
+        q.setErrorType(getString(body, "errorType", ""));
+        q.setMastery("UNMASTERED");
+        q.setAnswer(getString(body, "answer", ""));
+        q.setOriginalImageUrl(imageStorageService.persistIfBase64(getString(body, "originalImageUrl", ""), "original"));
+        q.setDiagramImageUrl(imageStorageService.persistIfBase64(getString(body, "diagramImageUrl", ""), "diagram"));
+
+        questionRepository.save(q);
+        log.info("学生 {} 录入错题: id={}, subject={}, title={}", student.getId(), q.getId(), subject,
+                q.getTitle() != null ? q.getTitle().substring(0, Math.min(30, q.getTitle().length())) : "");
+
+        return toVO(q, Collections.emptyMap(), Collections.emptyMap(), Collections.emptyMap());
+    }
+
+    // ==================== 学生掌握度更新 ====================
+
+    @Override
+    @Transactional
+    public void updateMastery(Long questionId, Map<String, Object> body) {
+        Student student = checkStudent();
+
+        Question q = questionRepository.findById(questionId)
+                .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+
+        // 越权校验：错题仅本人可改；共享新题(NEW) studentId 为空，进度按学生隔离
+        if (q.getStudentId() != null && !q.getStudentId().equals(student.getId())) {
+            throw new BusinessException(403, "无权操作他人题目");
+        }
+
+        String mastery = parseMastery(body.get("mastery"));
+        Boolean completed = parseCompleted(body.get("completed"));
+
+        if (q.getStudentId() != null) {
+            // 学生私有错题：进度直接落在题行上（一行一学生，无并发覆盖）
+            if (mastery != null) q.setMastery(mastery);
+            if (completed != null) q.setCompleted(completed);
+            Object answerVal = body.get("answer");
+            if (answerVal instanceof String s && !s.isBlank()) {
+                q.setAnswer(s);
+            }
+            questionRepository.save(q);
+            log.info("学生更新错题掌握度: questionId={}, mastery={}, completed={}",
+                    questionId, q.getMastery(), q.getCompleted());
+        } else {
+            // 共享新题：进度写入 student_question_progress，避免多学生互相覆盖
+            StudentQuestionProgress p = studentQuestionProgressRepository
+                    .findByStudentIdAndQuestionId(student.getId(), questionId)
+                    .orElseGet(() -> StudentQuestionProgress.builder()
+                            .studentId(student.getId())
+                            .questionId(questionId)
+                            .mastery("UNMASTERED")
+                            .completed(false)
+                            .build());
+            if (mastery != null) p.setMastery(mastery);
+            if (completed != null) p.setCompleted(completed);
+            studentQuestionProgressRepository.save(p);
+            // answer 是共享题的正确答案，学生不得修改，忽略
+            log.info("学生更新共享题进度: questionId={}, studentId={}, mastery={}, completed={}",
+                    questionId, student.getId(), p.getMastery(), p.getCompleted());
+        }
+    }
+
+    /** 解析 mastery（仅接受 UNMASTERED/FAMILIAR/MASTERED），缺失或非法返回 null */
+    private String parseMastery(Object val) {
+        if (val == null) return null;
+        String s = val instanceof String str ? str : String.valueOf(val);
+        return switch (s) {
+            case "UNMASTERED", "FAMILIAR", "MASTERED" -> s;
+            default -> null;
+        };
+    }
+
+    /** 解析 completed（boolean / 0/1 / "true"/"1"），缺失返回 null */
+    private Boolean parseCompleted(Object val) {
+        if (val == null) return null;
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Number n) return n.intValue() != 0;
+        if (val instanceof String s) return "true".equalsIgnoreCase(s) || "1".equals(s);
+        return null;
+    }
+
+    /** 共享新题：把当前学生的掌握度/完成状态从 student_question_progress 覆盖到 VO */
+    private void overlayProgress(List<QuestionVO> list, Long studentId) {
+        if (list.isEmpty()) return;
+        List<Long> qids = list.stream()
+                .map(QuestionVO::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        Map<Long, StudentQuestionProgress> m = studentQuestionProgressRepository
+                .findByStudentIdAndQuestionIdIn(studentId, qids).stream()
+                .collect(Collectors.toMap(StudentQuestionProgress::getQuestionId, p -> p, (a, b) -> a));
+        for (QuestionVO vo : list) {
+            StudentQuestionProgress p = m.get(vo.getId());
+            if (p != null) {
+                if (p.getMastery() != null) vo.setMastery(p.getMastery());
+                vo.setCompleted(p.getCompleted());
+            }
+        }
+    }
+
+    // ==================== 同类题目推荐 ====================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<QuestionVO> listSimilarQuestions(String subject, Long kpId, int count, Long excludeId) {
+        checkStudent();
+
+        // 走 question_knowledge_point 中间表索引精确匹配，替代 CSV 列 LIKE
+        List<Long> kpQuestionIds = questionKnowledgePointRepository.findQuestionIdsByKnowledgePointId(kpId);
+        if (kpQuestionIds.isEmpty()) return Collections.emptyList();
+
+        Specification<Question> spec = (root, query, cb) -> {
+            List<Predicate> predicates = new ArrayList<>();
+            predicates.add(cb.equal(root.get("subject"), subject));
+            predicates.add(root.get("id").in(kpQuestionIds));
+            if (excludeId != null) {
+                predicates.add(cb.notEqual(root.get("id"), excludeId));
+            }
+            return cb.and(predicates.toArray(new Predicate[0]));
+        };
+
+        List<Question> all = questionRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "id"));
+        log.info("同知识点题目查询: subject={}, kpId={}, 匹配{}道", subject, kpId, all.size());
+
+        // 随机打乱，取前 count 道
+        Collections.shuffle(all);
+        List<Question> picked = all.stream().limit(count).collect(Collectors.toList());
+
+        Map<Long, String> kpNameMap = resolveKpNameMap(picked);
+        return picked.stream()
+                .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap))
+                .collect(Collectors.toList());
+    }
+
+    private String getString(Map<String, Object> body, String key, String defaultValue) {
+        Object val = body.get(key);
+        return val instanceof String s && !s.isBlank() ? s : defaultValue;
+    }
+
+    /** 重建题目-知识点关联：先清后写（与 knowledge_point_ids CSV 列保持同步） */
+    private void replaceKnowledgePointLinks(Long questionId, String kpIdsCsv) {
+        questionKnowledgePointRepository.deleteByQuestionId(questionId);
+        if (kpIdsCsv == null || kpIdsCsv.isBlank()) return;
+        Set<Long> ids = Arrays.stream(kpIdsCsv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Long::valueOf)
+                .collect(Collectors.toSet());
+        List<QuestionKnowledgePoint> links = ids.stream()
+                .map(kpId -> QuestionKnowledgePoint.builder()
+                        .questionId(questionId)
+                        .knowledgePointId(kpId)
+                        .build())
+                .collect(Collectors.toList());
+        if (!links.isEmpty()) {
+            questionKnowledgePointRepository.saveAll(links);
+        }
     }
 }

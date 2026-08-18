@@ -1,0 +1,52 @@
+package com.eduai.system.service;
+
+import com.eduai.system.dto.DownloadFile;
+import com.eduai.system.dto.ResourceChapterDTO;
+import com.eduai.system.dto.ResourceSectionDTO;
+import com.eduai.system.dto.ResourceTextbookDTO;
+import com.eduai.system.entity.ResourceChapter;
+import com.eduai.system.entity.ResourceSection;
+import com.eduai.system.entity.ResourceTextbook;
+import com.eduai.system.vo.ResourceFileVO;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.List;
+
+/**
+ * 学习资源 Service（教材 → 章节 → 小节 → 资源文件）
+ */
+public interface ResourceService {
+
+    // ==================== 教材 ====================
+    List<ResourceTextbook> listTextbooks(String subject);
+
+    ResourceTextbook createTextbook(ResourceTextbookDTO dto);
+
+    void deleteTextbook(Long id);
+
+    // ==================== 章节 ====================
+    List<ResourceChapter> listChapters(Long textbookId);
+
+    ResourceChapter createChapter(Long textbookId, ResourceChapterDTO dto);
+
+    void deleteChapter(Long id);
+
+    // ==================== 小节 ====================
+    List<ResourceSection> listSections(Long chapterId);
+
+    ResourceSection createSection(Long chapterId, ResourceSectionDTO dto);
+
+    void deleteSection(Long id);
+
+    // ==================== 资源文件 ====================
+    List<ResourceFileVO> listResources(Long sectionId, String subject);
+
+    List<ResourceFileVO> uploadResources(Long sectionId, String subject, String tag,
+                                         String year, Integer price, Boolean shared,
+                                         List<MultipartFile> files);
+
+    void deleteResource(Long id);
+
+    /** 下载资源（流式，返回文件名 + 磁盘资源句柄，避免整文件载入内存） */
+    DownloadFile downloadResource(Long id);
+}

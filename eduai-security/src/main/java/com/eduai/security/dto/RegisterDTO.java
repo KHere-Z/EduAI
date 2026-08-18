@@ -22,6 +22,12 @@ public class RegisterDTO {
     @NotNull(message = "角色类型不能为空")
     private Integer roleType;
 
+    // ===== 短信验证码（注册时选填，填了必须校验） =====
+    /** 手机号 */
+    private String phone;
+    /** 短信验证码 */
+    private String code;
+
     // ===== 教师注册专属字段 =====
     /** 任教学科，逗号分隔，如 "math,physics" */
     private String subjectIds;

@@ -15,19 +15,22 @@
         <!-- 依赖所有业务模块 -->
         <dependency><groupId>com.eduai</groupId><artifactId>eduai-common</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.eduai</groupId><artifactId>eduai-security</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-file</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>com.eduai</groupId><artifactId>eduai-ai</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-statistics</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-common</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-english</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-chinese</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-math</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-physics</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-chemistry</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-biology</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-history</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-politics</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>com.eduai</groupId><artifactId>eduai-subject-geography</artifactId><version>${project.version}</version></dependency>
+
+        <!-- PDF 导出（试卷分析报告 + 出卷） -->
+        <dependency>
+            <groupId>org.xhtmlrenderer</groupId>
+            <artifactId>flying-saucer-pdf</artifactId>
+            <version>9.5.1</version>
+        </dependency>
+
+        <!-- LaTeX 公式渲染（出卷 PDF 中的数学公式） -->
+        <dependency>
+            <groupId>org.scilab.forge</groupId>
+            <artifactId>jlatexmath</artifactId>
+            <version>1.0.7</version>
+        </dependency>
+
     </dependencies>
 
     <build>

@@ -27,6 +27,10 @@ public class KnowledgePoint {
     @Column(nullable = false, length = 20)
     private String subject;
 
+    /** 所属老师 UID（owner，为空表示历史共享数据，仅管理员可见） */
+    @Column(name = "teacher_uid")
+    private Long teacherUid;
+
     /** 知识点名称 */
     @Column(nullable = false, length = 100)
     private String name;

@@ -5,6 +5,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * 打卡连续天数 VO
  */
@@ -22,4 +24,7 @@ public class StreakVO {
 
     /** 今日是否已打卡 */
     private boolean checkedInToday;
+
+    /** 打卡日期列表（yyyy-MM-dd，升序），供前端日历标记 */
+    private List<String> checkinDates;
 }

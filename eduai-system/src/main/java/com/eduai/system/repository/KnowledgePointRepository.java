@@ -38,6 +38,11 @@ public interface KnowledgePointRepository extends JpaRepository<KnowledgePoint, 
     boolean existsBySubjectAndName(String subject, String name);
 
     /**
+     * 按学科 + 名称 + 归属老师查找（owner 维度去重，允许不同老师各自建同名知识点）
+     */
+    boolean existsBySubjectAndNameAndTeacherUid(String subject, String name, Long teacherUid);
+
+    /**
      * 按学科查询所有（列表）
      */
     List<KnowledgePoint> findBySubjectOrderBySortOrderAsc(String subject);

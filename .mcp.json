@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jcodemunch": {
+      "command": "C:/Users/86151/AppData/Local/Programs/Python/Python310/Scripts/jcodemunch-mcp.EXE",
+      "args": ["serve"]
+    }
+  }
+}

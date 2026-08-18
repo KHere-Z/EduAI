@@ -1,0 +1,1 @@
+ALTER TABLE question_bank ADD COLUMN completed TINYINT(1) DEFAULT 0 COMMENT '是否完成 0未完成/1已完成';

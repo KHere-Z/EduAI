@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -40,4 +41,12 @@ public interface QuestionRepository extends JpaRepository<Question, Long>,
      * 按老师ID查询上传的题目
      */
     List<Question> findByTeacherId(Long teacherId);
+
+    /** 按学生ID删除所有题目（管理员删学生时级联清理） */
+    void deleteByStudentId(Long studentId);
+
+    /** 查找仍存 base64 data URL 的题目（用于存量图片落盘迁移，见 QuestionImageMigrationRunner） */
+    @Query("SELECT q FROM Question q WHERE q.originalImageUrl LIKE 'data:%' "
+            + "OR q.diagramImageUrl LIKE 'data:%' OR q.teacherAnalysisImage LIKE 'data:%'")
+    List<Question> findWithBase64Images();
 }

@@ -50,6 +50,9 @@ public class QuestionVO {
     // 分类
     private String difficulty;
     private String mastery;
+    private Boolean completed;
+    private String questionType;
+    private Boolean shared;
     private String errorType;
     private String gradeLevel;
 

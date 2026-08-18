@@ -49,4 +49,10 @@ public class QuestionUploadDTO {
 
     /** 解析配图文件类型 */
     private String teacherAnalysisImageType;
+
+    /** 题型：选择题/填空题/计算题/解答题 */
+    private String questionType;
+
+    /** 1=共享公域 0=私域 */
+    private Boolean shared;
 }

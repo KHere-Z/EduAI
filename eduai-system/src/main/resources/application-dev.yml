@@ -17,6 +17,10 @@ spring:
       hibernate:
         format_sql: true             # 格式化 SQL
 
+# Knife4j API 文档（开发环境开启）
+knife4j:
+  enable: true
+
 # 日志
 logging:
   level:

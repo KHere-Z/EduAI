@@ -4,13 +4,17 @@ import com.eduai.common.Result;
 import com.eduai.system.dto.AdminSettingsDTO;
 import com.eduai.system.dto.AdminStudentDTO;
 import com.eduai.system.dto.AdminTeacherDTO;
+import com.eduai.system.dto.AiModelDTO;
+import com.eduai.system.entity.AiConfig;
 import com.eduai.system.service.AdminService;
+import com.eduai.system.service.AiConfigService;
 import com.eduai.system.vo.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -25,6 +29,7 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminService adminService;
+    private final AiConfigService aiConfigService;
 
     // ==================== 学生管理 ====================
 
@@ -154,7 +159,7 @@ public class AdminController {
      * 获取当前系统配置
      */
     @GetMapping("/settings")
-    public Result<Map<String, String>> getSettings() {
+    public Result<Map<String, Object>> getSettings() {
         log.info("GET /api/v1/admin/settings");
         return Result.ok(adminService.getSettings());
     }
@@ -163,8 +168,67 @@ public class AdminController {
      * 更新系统配置（AI模型等）
      */
     @PutMapping("/settings")
-    public Result<Map<String, String>> updateSettings(@RequestBody AdminSettingsDTO dto) {
+    public Result<Map<String, Object>> updateSettings(@RequestBody AdminSettingsDTO dto) {
         log.info("PUT /api/v1/admin/settings body={}", dto);
         return Result.ok(adminService.updateSettings(dto));
+    }
+
+    /**
+     * 获取可用 AI 模型列表（从 ai_models 表动态读取）
+     */
+    @GetMapping("/settings/models")
+    public Result<List<AiModelVO>> getModels() {
+        return Result.ok(adminService.listModels());
+    }
+
+    // ==================== AI 模型管理 ====================
+
+    /**
+     * AI 模型列表
+     */
+    @GetMapping("/models")
+    public Result<List<AiModelVO>> listModels() {
+        log.info("GET /api/v1/admin/models");
+        return Result.ok(adminService.listModels());
+    }
+
+    /**
+     * 新增 AI 模型
+     */
+    @PostMapping("/models")
+    public Result<AiModelVO> createModel(@Valid @RequestBody AiModelDTO dto) {
+        log.info("POST /api/v1/admin/models body={}", dto);
+        return Result.ok(adminService.createModel(dto));
+    }
+
+    /**
+     * 更新 AI 模型
+     */
+    @PutMapping("/models/{id}")
+    public Result<AiModelVO> updateModel(@PathVariable Long id, @Valid @RequestBody AiModelDTO dto) {
+        log.info("PUT /api/v1/admin/models/{} body={}", id, dto);
+        return Result.ok(adminService.updateModel(id, dto));
+    }
+
+    /**
+     * 删除 AI 模型
+     */
+    @DeleteMapping("/models/{id}")
+    public Result<Void> deleteModel(@PathVariable Long id) {
+        log.info("DELETE /api/v1/admin/models/{}", id);
+        adminService.deleteModel(id);
+        return Result.ok();
+    }
+
+    // ==================== AI 按模块配置（兼容旧接口） ====================
+
+    @GetMapping("/settings/ai-config")
+    public Result<List<AiConfig>> getAiConfig() {
+        return Result.ok(aiConfigService.list());
+    }
+
+    @PutMapping("/settings/ai-config")
+    public Result<List<AiConfig>> updateAiConfig(@RequestBody List<AiConfig> configs) {
+        return Result.ok(aiConfigService.save(configs));
     }
 }

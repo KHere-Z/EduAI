@@ -29,3 +29,9 @@ logs/
 
 # Test
 *.db
+
+# Runtime uploads (user files)
+uploads/
+
+# Scratch / AI guide extracts
+_guide_*.txt

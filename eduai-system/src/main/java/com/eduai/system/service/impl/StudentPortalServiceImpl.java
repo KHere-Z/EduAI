@@ -13,6 +13,7 @@ import com.eduai.system.service.StudentPortalService;
 import com.eduai.system.vo.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -231,7 +232,12 @@ public class StudentPortalServiceImpl implements StudentPortalService {
                 .studentId(student.getId())
                 .checkinDate(today)
                 .build();
-        studentCheckinRepository.save(checkin);
+        try {
+            studentCheckinRepository.save(checkin);
+        } catch (DataIntegrityViolationException e) {
+            // 并发下唯一约束兜底：同一天已打卡
+            throw new BusinessException("今日已打卡");
+        }
         log.info("学生{} 打卡: date={}", student.getId(), today);
     }
 
@@ -244,27 +250,34 @@ public class StudentPortalServiceImpl implements StudentPortalService {
         List<StudentCheckin> checkins = studentCheckinRepository
                 .findByStudentIdOrderByCheckinDateDesc(student.getId());
 
-        boolean checkedInToday = !checkins.isEmpty() && checkins.get(0).getCheckinDate().equals(today);
+        boolean checkedInToday = checkins.stream()
+                .anyMatch(c -> c.getCheckinDate().equals(today));
 
-        // 计算连续天数
+        // 计算连续天数：今日已打卡从今天往回数，今日未打卡从昨天往回数（避免未打卡当天显示 0）
         int streak = 0;
-        LocalDate expected = today;
+        LocalDate cursor = checkedInToday ? today : today.minusDays(1);
         for (StudentCheckin c : checkins) {
-            if (c.getCheckinDate().equals(expected)) {
+            if (c.getCheckinDate().isAfter(cursor)) {
+                continue; // 跳过未来日期 / 已计过的今天
+            }
+            if (c.getCheckinDate().equals(cursor)) {
                 streak++;
-                expected = expected.minusDays(1);
-            } else if (c.getCheckinDate().equals(expected.plusDays(1))) {
-                // skip gaps (if student checked in today but missed yesterday, streak starts from today)
-                break;
+                cursor = cursor.minusDays(1);
             } else {
-                break;
+                break; // 中间断档，连续到此为止
             }
         }
+
+        List<String> checkinDates = checkins.stream()
+                .map(c -> c.getCheckinDate().toString())
+                .sorted()
+                .collect(Collectors.toList());
 
         return StreakVO.builder()
                 .streak(streak)
                 .totalDays(checkins.size())
                 .checkedInToday(checkedInToday)
+                .checkinDates(checkinDates)
                 .build();
     }
 }
