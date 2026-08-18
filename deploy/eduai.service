@@ -1,7 +1,8 @@
 [Unit]
 Description=EduAI 智学AI教育 后端服务
-# 依赖网络与数据库/Redis 就绪（单机部署时；云库/云Redis 可删掉 mysql.service/redis.service）
-After=network-online.target
+# 同机部署 MySQL/Redis 时按序启动；服务名因发行版而异
+# （Ubuntu: mysql.service / redis-server.service；CentOS: mysqld.service / redis.service）
+After=network-online.target mysql.service redis.service
 Wants=network-online.target
 
 [Service]
