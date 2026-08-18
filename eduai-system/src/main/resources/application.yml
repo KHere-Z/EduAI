@@ -71,11 +71,12 @@ spring:
         order_updates: true                     # 排序 UPDATE 提升批量性能
         default_batch_fetch_size: 100           # 懒加载批量抓取
 
-  # Redis 配置
+  # Redis 配置（生产通过环境变量注入真实地址/密码）
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
       timeout: 5000ms
       lettuce:
         pool:
@@ -117,10 +118,10 @@ knife4j:
   setting:
     language: zh_cn
 
-# 上传文件配置
+# 上传文件配置（生产用绝对路径，通过环境变量 UPLOAD_DIR 注入；缺省相对路径 uploads）
 eduai:
   upload:
-    dir: uploads
+    dir: ${UPLOAD_DIR:uploads}
   # ==================== 支付配置（真实 SDK 接入预留） ====================
   # 开发环境 channel=mock；生产接入真实支付宝/微信时改为 alipay/wechat 并填充凭证。
   # 凭证务必通过环境变量注入，勿硬编码进配置文件。
