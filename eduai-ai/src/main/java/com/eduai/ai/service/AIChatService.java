@@ -255,7 +255,7 @@ public class AIChatService {
     /** 判断是否使用 Doubao 格式（请求级 model > 全局配置） */
     private boolean isDoubao(String requestModel) {
         String model = getEffectiveModel(requestModel);
-        return model != null && model.contains("doubao");
+        return model != null && (model.contains("doubao") || model.startsWith("ep-"));
     }
 
     /** 判断是否使用 Doubao 格式（无请求 model，仅看全局配置） */
