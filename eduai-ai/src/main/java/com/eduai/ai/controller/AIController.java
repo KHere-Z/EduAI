@@ -304,7 +304,7 @@ public class AIController {
 
         Files.write(target, bytes);
 
-        String url = "/" + uploadDir + "/ai/" + dateDir + "/" + storedName;
+        String url = "/uploads/ai/" + dateDir + "/" + storedName;
         log.info("✅ 文件保存成功: {} → {} ({} bytes, 路径: {})",
                 originalName, url, bytes.length, target.toAbsolutePath());
 

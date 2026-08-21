@@ -513,7 +513,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
             Path imgPath;
             if (normalized.startsWith("/")) {
                 // web URL（/uploads/...）→ 去掉 /uploads/ 前缀，相对 uploads 目录解析
-                String prefix = "/" + uploadDir + "/";
+                String prefix = "/uploads/";
                 if (!normalized.startsWith(prefix)) {
                     log.warn("拒绝非法图片路径: {}", imageUrl);
                     return null;

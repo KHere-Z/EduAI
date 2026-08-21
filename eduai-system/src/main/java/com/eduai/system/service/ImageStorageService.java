@@ -56,7 +56,7 @@ public class ImageStorageService {
             Path target = dir.resolve(name);
             Files.write(target, bytes);
 
-            String url = "/" + uploadDir + "/question-images/" + subDir + "/" + dateDir + "/" + name;
+            String url = "/uploads/question-images/" + subDir + "/" + dateDir + "/" + name;
             log.info("图片落盘: {} bytes → {}", bytes.length, url);
             return url;
         } catch (Exception e) {
