@@ -115,6 +115,7 @@ public class Question {
 
     /** 是否完成：0=未完成 / 1=已完成 */
     @Column(nullable = false)
+    @Builder.Default
     private Boolean completed = false;
 
     /** 题型：选择题/填空题/计算题/解答题 */
