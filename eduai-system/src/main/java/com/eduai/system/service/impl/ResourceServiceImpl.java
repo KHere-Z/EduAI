@@ -43,6 +43,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -83,6 +84,13 @@ public class ResourceServiceImpl implements ResourceService {
     /** 校验已登录（任意角色） */
     private void checkAuthenticated() {
         StpUtil.checkLogin();
+    }
+
+    /** Map 值转非空字符串：null / 空白 → null，用于更新接口的「只改传入字段」 */
+    private String strVal(Object v) {
+        if (v == null) return null;
+        String s = String.valueOf(v).trim();
+        return s.isEmpty() ? null : s;
     }
 
     /** 当前登录用户上下文 */
@@ -165,6 +173,38 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "resourceTextbooks", allEntries = true)
+    public ResourceTextbook updateTextbook(Long id, Map<String, Object> body) {
+        checkTeacherOrAdmin();
+        ResourceTextbook textbook = textbookRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "教材不存在"));
+
+        if (body != null) {
+            String name = strVal(body.get("name"));
+            if (name != null) textbook.setName(name);
+            String version = strVal(body.get("version"));
+            if (version != null) textbook.setVersion(version);
+            if (body.get("sortOrder") instanceof Number) {
+                textbook.setSortOrder(((Number) body.get("sortOrder")).intValue());
+            }
+        }
+        return textbookRepository.save(textbook);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "resourceTextbooks", allEntries = true)
+    public void reorderTextbooks(List<Long> orderedIds) {
+        checkTeacherOrAdmin();
+        if (orderedIds == null || orderedIds.isEmpty()) return;
+        for (int i = 0; i < orderedIds.size(); i++) {
+            ResourceTextbook t = textbookRepository.findById(orderedIds.get(i)).orElse(null);
+            if (t != null) t.setSortOrder(i + 1);
+        }
+    }
+
+    @Override
+    @Transactional
     @Caching(evict = {
             @CacheEvict(value = "resourceTextbooks", allEntries = true),
             @CacheEvict(value = "resourceChapters", allEntries = true),
@@ -215,6 +255,36 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional
+    @CacheEvict(value = "resourceChapters", allEntries = true)
+    public ResourceChapter updateChapter(Long id, Map<String, Object> body) {
+        checkTeacherOrAdmin();
+        ResourceChapter chapter = chapterRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "章节不存在"));
+
+        if (body != null) {
+            String name = strVal(body.get("name"));
+            if (name != null) chapter.setName(name);
+            if (body.get("sortOrder") instanceof Number) {
+                chapter.setSortOrder(((Number) body.get("sortOrder")).intValue());
+            }
+        }
+        return chapterRepository.save(chapter);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "resourceChapters", allEntries = true)
+    public void reorderChapters(List<Long> orderedIds) {
+        checkTeacherOrAdmin();
+        if (orderedIds == null || orderedIds.isEmpty()) return;
+        for (int i = 0; i < orderedIds.size(); i++) {
+            ResourceChapter c = chapterRepository.findById(orderedIds.get(i)).orElse(null);
+            if (c != null) c.setSortOrder(i + 1);
+        }
+    }
+
+    @Override
+    @Transactional
     @Caching(evict = {
             @CacheEvict(value = "resourceChapters", allEntries = true),
             @CacheEvict(value = "resourceSections", allEntries = true)
@@ -256,6 +326,36 @@ public class ResourceServiceImpl implements ResourceService {
                 .sortOrder(sortOrder)
                 .build();
         return sectionRepository.save(section);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "resourceSections", allEntries = true)
+    public ResourceSection updateSection(Long id, Map<String, Object> body) {
+        checkTeacherOrAdmin();
+        ResourceSection section = sectionRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "小节不存在"));
+
+        if (body != null) {
+            String name = strVal(body.get("name"));
+            if (name != null) section.setName(name);
+            if (body.get("sortOrder") instanceof Number) {
+                section.setSortOrder(((Number) body.get("sortOrder")).intValue());
+            }
+        }
+        return sectionRepository.save(section);
+    }
+
+    @Override
+    @Transactional
+    @CacheEvict(value = "resourceSections", allEntries = true)
+    public void reorderSections(List<Long> orderedIds) {
+        checkTeacherOrAdmin();
+        if (orderedIds == null || orderedIds.isEmpty()) return;
+        for (int i = 0; i < orderedIds.size(); i++) {
+            ResourceSection s = sectionRepository.findById(orderedIds.get(i)).orElse(null);
+            if (s != null) s.setSortOrder(i + 1);
+        }
     }
 
     @Override

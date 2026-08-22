@@ -11,6 +11,7 @@ import com.eduai.system.vo.ResourceFileVO;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 学习资源 Service（教材 → 章节 → 小节 → 资源文件）
@@ -22,6 +23,10 @@ public interface ResourceService {
 
     ResourceTextbook createTextbook(ResourceTextbookDTO dto);
 
+    ResourceTextbook updateTextbook(Long id, Map<String, Object> body);
+
+    void reorderTextbooks(List<Long> orderedIds);
+
     void deleteTextbook(Long id);
 
     // ==================== 章节 ====================
@@ -29,12 +34,20 @@ public interface ResourceService {
 
     ResourceChapter createChapter(Long textbookId, ResourceChapterDTO dto);
 
+    ResourceChapter updateChapter(Long id, Map<String, Object> body);
+
+    void reorderChapters(List<Long> orderedIds);
+
     void deleteChapter(Long id);
 
     // ==================== 小节 ====================
     List<ResourceSection> listSections(Long chapterId);
 
     ResourceSection createSection(Long chapterId, ResourceSectionDTO dto);
+
+    ResourceSection updateSection(Long id, Map<String, Object> body);
+
+    void reorderSections(List<Long> orderedIds);
 
     void deleteSection(Long id);
 

@@ -2,6 +2,7 @@ package com.eduai.system.controller;
 
 import com.eduai.common.Result;
 import com.eduai.system.dto.DownloadFile;
+import com.eduai.system.dto.ReorderDTO;
 import com.eduai.system.dto.ResourceChapterDTO;
 import com.eduai.system.dto.ResourceSectionDTO;
 import com.eduai.system.dto.ResourceTextbookDTO;
@@ -23,6 +24,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 学习资源 Controller（教材 → 章节 → 小节 → 资源文件）
@@ -53,6 +55,22 @@ public class ResourceController {
         return Result.ok(resourceService.createTextbook(dto));
     }
 
+    /** 更新教材（只改传入字段） */
+    @PutMapping("/textbooks/{id}")
+    public Result<ResourceTextbook> updateTextbook(@PathVariable Long id,
+                                                   @RequestBody Map<String, Object> body) {
+        log.info("PUT /api/v1/resource/textbooks/{} body={}", id, body);
+        return Result.ok(resourceService.updateTextbook(id, body));
+    }
+
+    /** 教材排序 */
+    @PutMapping("/textbooks/reorder")
+    public Result<Void> reorderTextbooks(@RequestBody ReorderDTO dto) {
+        log.info("PUT /api/v1/resource/textbooks/reorder orderedIds={}", dto != null ? dto.getOrderedIds() : null);
+        resourceService.reorderTextbooks(dto != null ? dto.getOrderedIds() : null);
+        return Result.ok();
+    }
+
     /** 删除教材（级联删章节/小节/资源） */
     @DeleteMapping("/textbooks/{id}")
     public Result<Void> deleteTextbook(@PathVariable Long id) {
@@ -77,6 +95,22 @@ public class ResourceController {
         return Result.ok(resourceService.createChapter(textbookId, dto));
     }
 
+    /** 更新章节（只改传入字段） */
+    @PutMapping("/chapters/{id}")
+    public Result<ResourceChapter> updateChapter(@PathVariable Long id,
+                                                 @RequestBody Map<String, Object> body) {
+        log.info("PUT /api/v1/resource/chapters/{} body={}", id, body);
+        return Result.ok(resourceService.updateChapter(id, body));
+    }
+
+    /** 章节排序 */
+    @PutMapping("/chapters/reorder")
+    public Result<Void> reorderChapters(@RequestBody ReorderDTO dto) {
+        log.info("PUT /api/v1/resource/chapters/reorder orderedIds={}", dto != null ? dto.getOrderedIds() : null);
+        resourceService.reorderChapters(dto != null ? dto.getOrderedIds() : null);
+        return Result.ok();
+    }
+
     /** 删除章节（级联删小节/资源） */
     @DeleteMapping("/chapters/{id}")
     public Result<Void> deleteChapter(@PathVariable Long id) {
@@ -99,6 +133,22 @@ public class ResourceController {
                                                  @Valid @RequestBody ResourceSectionDTO dto) {
         log.info("POST /api/v1/resource/chapters/{}/sections body={}", chapterId, dto);
         return Result.ok(resourceService.createSection(chapterId, dto));
+    }
+
+    /** 更新小节（只改传入字段） */
+    @PutMapping("/sections/{id}")
+    public Result<ResourceSection> updateSection(@PathVariable Long id,
+                                                 @RequestBody Map<String, Object> body) {
+        log.info("PUT /api/v1/resource/sections/{} body={}", id, body);
+        return Result.ok(resourceService.updateSection(id, body));
+    }
+
+    /** 小节排序 */
+    @PutMapping("/sections/reorder")
+    public Result<Void> reorderSections(@RequestBody ReorderDTO dto) {
+        log.info("PUT /api/v1/resource/sections/reorder orderedIds={}", dto != null ? dto.getOrderedIds() : null);
+        resourceService.reorderSections(dto != null ? dto.getOrderedIds() : null);
+        return Result.ok();
     }
 
     /** 删除小节（级联删资源） */
