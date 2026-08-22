@@ -147,7 +147,7 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(value = "resourceTextbooks", key = "'subject:' + #subject", unless = "#result == null")
+    @Cacheable(value = "resourceTextbooks", key = "'subject:' + #subject", unless = "#result == null || #result.isEmpty()")
     public List<ResourceTextbook> listTextbooks(String subject) {
         checkAuthenticated();
         return textbookRepository.findBySubjectOrderBySortOrderAsc(subject);
@@ -228,7 +228,7 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(value = "resourceChapters", key = "'textbookId:' + #textbookId", unless = "#result == null")
+    @Cacheable(value = "resourceChapters", key = "'textbookId:' + #textbookId", unless = "#result == null || #result.isEmpty()")
     public List<ResourceChapter> listChapters(Long textbookId) {
         checkAuthenticated();
         return chapterRepository.findByTextbookIdOrderBySortOrderAsc(textbookId);
@@ -303,7 +303,7 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(value = "resourceSections", key = "'chapterId:' + #chapterId", unless = "#result == null")
+    @Cacheable(value = "resourceSections", key = "'chapterId:' + #chapterId", unless = "#result == null || #result.isEmpty()")
     public List<ResourceSection> listSections(Long chapterId) {
         checkAuthenticated();
         return sectionRepository.findByChapterIdOrderBySortOrderAsc(chapterId);
