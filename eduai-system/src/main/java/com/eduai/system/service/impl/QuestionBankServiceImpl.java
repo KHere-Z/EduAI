@@ -102,6 +102,17 @@ public class QuestionBankServiceImpl implements QuestionBankService {
         return StpUtil.getLoginIdAsLong();
     }
 
+    /**
+     * 老师是否可管理（编辑/删除）某题：
+     * 老师自建题(source!=STUDENT)仅本人可管；学生错题(source=STUDENT)绑定老师可管。
+     */
+    private boolean canManageQuestion(Question q, Long teacherId) {
+        if ("STUDENT".equals(q.getSource())) {
+            return teacherStudentRepository.findByTeacherIdAndStudentId(teacherId, q.getStudentId()).isPresent();
+        }
+        return q.getTeacherId() != null && q.getTeacherId().equals(teacherId);
+    }
+
     // ==================== 老师端 ====================
 
     @Override
@@ -163,8 +174,10 @@ public class QuestionBankServiceImpl implements QuestionBankService {
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
-        // 私域题仅上传老师可见；共享题所有老师可见
-        if (!Boolean.TRUE.equals(q.getShared()) && !teacherId.equals(q.getTeacherId())) {
+        // 私域题仅上传老师可见；共享题所有老师可见；学生错题(source=STUDENT)仅绑定老师可见
+        boolean boundStudentQ = "STUDENT".equals(q.getSource())
+                && teacherStudentRepository.findByTeacherIdAndStudentId(teacherId, q.getStudentId()).isPresent();
+        if (!Boolean.TRUE.equals(q.getShared()) && !teacherId.equals(q.getTeacherId()) && !boundStudentQ) {
             throw new BusinessException(403, "无权访问他人私域题目");
         }
 
@@ -194,8 +207,8 @@ public class QuestionBankServiceImpl implements QuestionBankService {
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
-        // 新题(teacherId 非空)仅上传老师可改；错题(teacherId 空)为共享批改
-        if (q.getTeacherId() != null && !q.getTeacherId().equals(teacherId)) {
+        // 鉴权：老师自建题仅本人可改；学生错题(source=STUDENT)绑定老师可改
+        if (!canManageQuestion(q, teacherId)) {
             throw new BusinessException(403, "无权修改他人题目");
         }
 
@@ -219,7 +232,10 @@ public class QuestionBankServiceImpl implements QuestionBankService {
         if (dto.getSolution() != null) q.setSolution(dto.getSolution());
         if (dto.getErrorType() != null) q.setErrorType(dto.getErrorType());
         if (dto.getQuestionType() != null) q.setQuestionType(dto.getQuestionType());
-        if (dto.getShared() != null) q.setShared(dto.getShared());
+        if (dto.getShared() != null) {
+            // 学生错题(source=STUDENT)不可转共享，恒私有
+            q.setShared("STUDENT".equals(q.getSource()) ? Boolean.FALSE : dto.getShared());
+        }
 
         q = questionRepository.save(q);
         log.info("教师{} 更新题目: id={}", getCurrentUserId(), id);
@@ -366,8 +382,8 @@ public class QuestionBankServiceImpl implements QuestionBankService {
 
         Question q = questionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "题目不存在"));
-        // 新题(teacherId 非空)仅上传老师可删；错题(teacherId 空)为共享批改
-        if (q.getTeacherId() != null && !q.getTeacherId().equals(teacherId)) {
+        // 鉴权：老师自建题仅本人可删；学生错题(source=STUDENT)绑定老师可删
+        if (!canManageQuestion(q, teacherId)) {
             throw new BusinessException(403, "无权删除他人题目");
         }
 
@@ -537,13 +553,21 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 predicates.add(cb.equal(root.get("questionType"), questionType));
             }
 
-            // 权限隔离：老师只能看公域题目 + 自己的私域题目
+            // 权限隔离：
+            //  - 老师自建题(source!=STUDENT)：公域(shared=true) 或 本人(teacherId=当前)
+            //  - 学生错题(source=STUDENT)：仅绑定老师(teacher_student 关系)可见，不受 shared 影响
             Long currentTeacherId = getCurrentUserId();
-            Predicate sharedOr = cb.or(
-                    cb.equal(root.get("shared"), true),
-                    cb.equal(root.get("teacherId"), currentTeacherId)
+            List<Long> boundStudentIds = teacherStudentRepository.findByTeacherId(currentTeacherId)
+                    .stream().map(TeacherStudent::getStudentId).toList();
+
+            Predicate teacherOrPublic = cb.and(
+                    cb.notEqual(root.get("source"), "STUDENT"),
+                    cb.or(cb.equal(root.get("shared"), true), cb.equal(root.get("teacherId"), currentTeacherId))
             );
-            predicates.add(sharedOr);
+            Predicate boundStudentQ = boundStudentIds.isEmpty()
+                    ? cb.disjunction()
+                    : cb.and(cb.equal(root.get("source"), "STUDENT"), root.get("studentId").in(boundStudentIds));
+            predicates.add(cb.or(teacherOrPublic, boundStudentQ));
 
             return cb.and(predicates.toArray(new Predicate[0]));
         };
@@ -617,7 +641,7 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .mastery(q.getMastery())
                 .completed(q.getCompleted())
                 .questionType(q.getQuestionType())
-                .shared(q.getShared())
+                .shared("STUDENT".equals(q.getSource()) ? Boolean.FALSE : q.getShared())
                 .errorType(q.getErrorType())
                 .gradeLevel(q.getGradeLevel())
                 .createdAt(q.getCreatedAt())
@@ -637,6 +661,7 @@ public class QuestionBankServiceImpl implements QuestionBankService {
         q.setType("WRONG");
         q.setSource("STUDENT");
         q.setStudentId(student.getId());
+        q.setShared(false); // 学生错题恒私有，不可转共享
         q.setTitle((String) body.get("title"));
         q.setKnowledgePointIds(null); // 待老师标识
         q.setDifficulty(getString(body, "difficulty", "MEDIUM"));
