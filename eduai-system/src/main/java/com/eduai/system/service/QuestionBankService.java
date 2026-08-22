@@ -51,6 +51,16 @@ public interface QuestionBankService {
      */
     List<StudentBriefVO> listTeacherStudents(String subject);
 
+    /**
+     * 老师查看指定学生的错题（分页，可选按学科筛选）。
+     * <p>
+     * 两步鉴权：① 当前登录人是老师（角色校验）；② 存在 {@code (teacherId=当前老师, studentId=参数)}
+     * 的绑定关系。不满足返回 403（而非空列表，避免前端误判为「无数据」）；学生不存在返回 404。
+     *
+     * @param studentId 学生ID（students.id）
+     */
+    QuestionPageVO listTeacherStudentWrongQuestions(int page, int pageSize, String subject, Long studentId);
+
     // ==================== 学生端 ====================
 
     /**

@@ -318,6 +318,47 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public QuestionPageVO listTeacherStudentWrongQuestions(int page, int pageSize, String subject, Long studentId) {
+        checkTeacher();
+        Long teacherId = getCurrentUserId();
+
+        // 1. 学生存在性校验（404）
+        Student student = studentRepository.findById(studentId)
+                .orElseThrow(() -> new BusinessException(404, "学生不存在"));
+
+        // 2. 绑定关系校验（403）：teacherId ↔ studentId 必须存在绑定，否则无权查看
+        boolean bound = teacherStudentRepository.findByTeacherIdAndStudentId(teacherId, studentId).isPresent();
+        if (!bound) {
+            throw new BusinessException(403, "未绑定该学生，无权查看");
+        }
+
+        // 3. 查该学生的错题（复用学生端查询逻辑，studentId 即 students.id）
+        Pageable pageable = PageRequest.of(page - 1, pageSize, Sort.by(Sort.Direction.DESC, "id"));
+        Page<Question> questionPage;
+        if (subject != null && !subject.isBlank()) {
+            questionPage = questionRepository.findByStudentIdAndSubjectAndType(studentId, subject, "WRONG", pageable);
+        } else {
+            questionPage = questionRepository.findByStudentIdAndType(studentId, "WRONG", pageable);
+        }
+
+        // 学生姓名回填到 VO（老师端展示该学生的错题列表需要）
+        Map<Long, String> studentNameMap = Map.of(student.getId(), student.getName());
+        Map<Long, String> kpNameMap = resolveKpNameMap(questionPage.getContent());
+        List<QuestionVO> list = questionPage.getContent().stream()
+                .map(q -> toVO(q, studentNameMap, Collections.emptyMap(), kpNameMap))
+                .collect(Collectors.toList());
+
+        log.info("老师{} 查看学生{}错题: subject={}, 共{}条", teacherId, studentId, subject, questionPage.getTotalElements());
+        return QuestionPageVO.builder()
+                .list(list)
+                .total(questionPage.getTotalElements())
+                .page(page)
+                .pageSize(pageSize)
+                .build();
+    }
+
+    @Override
     @Transactional
     public void deleteQuestion(Long id) {
         checkTeacher();
