@@ -811,6 +811,34 @@ public class AIChatService {
         return executeChatStream(request);
     }
 
+    /**
+     * 题目 AI 批改 — 判断学生作答是否正确并给出批改说明。
+     * <p>
+     * <b>必须同步</b>（不加 {@code @Async}）：调用方 {@code QuestionBankServiceImpl.gradeQuestion}
+     * 在同一事务内先扣点、再调本方法，等待 AI 返回后决定 COMMIT/ROLLBACK。异步会脱离事务，
+     * AI 失败也无法回滚扣点。返回约定 JSON 文本，由调用方解析 {@code {correct, result}}。
+     * <p>
+     * 复用 {@code wrong_analysis} 模块已配的 vision 模型，不新增 ai_config 配置。
+     */
+    public String gradeQuestion(ChatRequest request) {
+        request.setSystemPrompt(
+                "你是资深K12学科老师，负责批改学生提交的题目作答。\n" +
+                        "请严格判断学生答案是否正确，并给出简洁的批改说明。\n" +
+                        "只输出一个 JSON 对象，不要输出任何其他文字或 markdown 代码块，格式如下：\n" +
+                        "{\"correct\": true或false, \"result\": \"批改说明，指出对错原因和正确解法（若错误）\"}\n" +
+                        "correct 为布尔值：true 表示作答正确，false 表示作答错误。"
+        );
+        // 专用端点始终使用后端配置的模型，不受前端传参影响
+        Map<String, String> resolved = config.resolveModel("wrong_analysis");
+        request.setModel(resolved.get("model"));
+        request.setApiUrl(resolved.get("apiUrl"));
+        request.setApiKey(resolved.get("apiKey"));
+        log.info("📝 gradeQuestion 路由: resolveModel(wrong_analysis) → model={}, url={}, keyPrefix={}",
+                resolved.get("model"), resolved.get("apiUrl"),
+                resolved.get("apiKey") != null ? resolved.get("apiKey").substring(0, Math.min(8, resolved.get("apiKey").length())) + "***" : "NULL");
+        return executeChat(request);
+    }
+
     // ==================== 内部方法 ====================
 
     /**

@@ -46,6 +46,7 @@ public class PointServiceImpl implements PointService {
     public static final int COST_AI_CHAT = 3;
     public static final int COST_AI_WRONG_ANALYSIS = 5;
     public static final int COST_AI_EXAM_ANALYSIS = 10;
+    public static final int COST_AI_QUESTION_GRADE = 5;
 
     @Override
     public PointVO getPoints(Long userId) {
@@ -105,7 +106,8 @@ public class PointServiceImpl implements PointService {
     @Override
     @Transactional
     public void consume(Long userId, int amount, String description) {
-        User user = userRepository.findById(userId)
+        // SELECT ... FOR UPDATE 行锁，防止并发扣点超扣（必须在事务内，见方法级 @Transactional）
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new BusinessException(400, "用户不存在"));
 
         int before = user.getPoints() != null ? user.getPoints() : 0;

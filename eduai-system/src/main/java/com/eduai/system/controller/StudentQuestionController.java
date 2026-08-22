@@ -2,11 +2,13 @@ package com.eduai.system.controller;
 
 import com.eduai.common.Result;
 import com.eduai.system.service.QuestionBankService;
+import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -70,5 +72,20 @@ public class StudentQuestionController {
         log.info("PUT /api/v1/student/questions/{}/mastery body={}", id, body);
         questionBankService.updateMastery(id, body);
         return Result.ok();
+    }
+
+    /**
+     * 题目 AI 批改（扣 5 智学点）
+     * <p>
+     * POST /api/v1/student/questions/{questionId}/grade
+     * multipart: file=答题图片（必填）, answerText=作答文字（可选）
+     */
+    @PostMapping("/{questionId}/grade")
+    public Result<GradeResultVO> grade(@PathVariable Long questionId,
+                                       @RequestParam("file") MultipartFile file,
+                                       @RequestParam(required = false) String answerText) {
+        log.info("POST /api/v1/student/questions/{}/grade answerText={}", questionId,
+                answerText != null && answerText.length() > 50 ? answerText.substring(0, 50) + "..." : answerText);
+        return Result.ok(questionBankService.gradeQuestion(questionId, file, answerText));
     }
 }

@@ -1,18 +1,24 @@
 package com.eduai.system.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import com.eduai.ai.dto.ChatRequest;
+import com.eduai.ai.service.AIChatService;
 import com.eduai.common.BusinessException;
 import com.eduai.security.entity.User;
 import com.eduai.security.repository.UserRepository;
+import com.eduai.security.service.PointService;
+import com.eduai.security.service.impl.PointServiceImpl;
 import com.eduai.system.dto.QuestionUpdateDTO;
 import com.eduai.system.dto.QuestionUploadDTO;
 import com.eduai.system.entity.Question;
+import com.eduai.system.entity.QuestionGradeRecord;
 import com.eduai.system.entity.QuestionKnowledgePoint;
 import com.eduai.system.entity.Student;
 import com.eduai.system.entity.StudentEnrollment;
 import com.eduai.system.entity.StudentQuestionProgress;
 import com.eduai.system.entity.TeacherStudent;
 import com.eduai.system.repository.KnowledgePointRepository;
+import com.eduai.system.repository.QuestionGradeRecordRepository;
 import com.eduai.system.repository.QuestionKnowledgePointRepository;
 import com.eduai.system.repository.QuestionRepository;
 import com.eduai.system.repository.StudentEnrollmentRepository;
@@ -21,9 +27,12 @@ import com.eduai.system.repository.StudentRepository;
 import com.eduai.system.repository.TeacherStudentRepository;
 import com.eduai.system.service.ImageStorageService;
 import com.eduai.system.service.QuestionBankService;
+import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
 import com.eduai.system.vo.StudentBriefVO;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -34,7 +43,9 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -57,6 +68,11 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     private final StudentEnrollmentRepository studentEnrollmentRepository;
     private final StudentQuestionProgressRepository studentQuestionProgressRepository;
     private final ImageStorageService imageStorageService;
+    private final PointService pointService;
+    private final AIChatService aiChatService;
+    private final QuestionGradeRecordRepository questionGradeRecordRepository;
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /** 校验当前用户是否为教师（roleType=3） */
     private void checkTeacher() {
@@ -747,4 +763,134 @@ public class QuestionBankServiceImpl implements QuestionBankService {
             questionKnowledgePointRepository.saveAll(links);
         }
     }
+
+    // ==================== AI 批改 ====================
+
+    @Override
+    @Transactional
+    public GradeResultVO gradeQuestion(Long questionId, MultipartFile file, String answerText) {
+        Student student = checkStudent();          // students.id（记录/题目归属）
+        Long userId = getCurrentUserId();          // users.id（智学点扣减）
+
+        // 幂等：一题一学生只批改一次，命中缓存直接返回，不扣点、不调 AI
+        Optional<QuestionGradeRecord> cached = questionGradeRecordRepository
+                .findByQuestionIdAndStudentId(questionId, student.getId());
+        if (cached.isPresent()) {
+            QuestionGradeRecord r = cached.get();
+            log.info("AI批改命中缓存: questionId={}, studentId={}", questionId, student.getId());
+            return GradeResultVO.builder()
+                    .correct(r.getCorrect())
+                    .result(r.getResult())
+                    .cached(true)
+                    .build();
+        }
+
+        Question q = questionRepository.findById(questionId)
+                .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+
+        // 越权校验：错题(studentId 非空)仅本人可批改；共享新题(studentId 空)所有学生可批改
+        if (q.getStudentId() != null && !q.getStudentId().equals(student.getId())) {
+            throw new BusinessException(403, "无权批改他人题目");
+        }
+
+        // 答题图片落盘（multipart → COS / 本地）
+        String imageUrl = null;
+        if (file != null && !file.isEmpty()) {
+            byte[] bytes;
+            try {
+                bytes = file.getBytes();
+            } catch (IOException e) {
+                throw new BusinessException(400, "答题图片读取失败");
+            }
+            imageUrl = imageStorageService.persistBytes(bytes, extractFileExt(file.getOriginalFilename()), "grade");
+        }
+
+        // 先扣点（FOR UPDATE 原子，同事务），AI 失败则随事务回滚
+        pointService.consume(userId, PointServiceImpl.COST_AI_QUESTION_GRADE, "AI批改");
+
+        // 同步调 AI（等待返回后决定 COMMIT/ROLLBACK）
+        String aiResult = aiChatService.gradeQuestion(buildGradeRequest(q, answerText, imageUrl));
+
+        // 解析 {correct, result}
+        GradeParse pr = parseGradeResult(aiResult);
+
+        // 落记录（唯一键兜底幂等）
+        questionGradeRecordRepository.save(QuestionGradeRecord.builder()
+                .questionId(questionId)
+                .studentId(student.getId())
+                .answerImageUrl(imageUrl)
+                .answerText(answerText)
+                .correct(pr.correct())
+                .result(pr.result())
+                .build());
+
+        log.info("AI批改完成: questionId={}, studentId={}, correct={}", questionId, student.getId(), pr.correct());
+        return GradeResultVO.builder()
+                .correct(pr.correct())
+                .result(pr.result())
+                .cached(false)
+                .build();
+    }
+
+    /** 构建批改 ChatRequest：题目 + 标准答案 + 学生作答文字 + 答题图片 */
+    private ChatRequest buildGradeRequest(Question q, String answerText, String imageUrl) {
+        StringBuilder sb = new StringBuilder();
+        if (q.getTitle() != null && !q.getTitle().isBlank()) {
+            sb.append("题目：").append(q.getTitle());
+        }
+        if (q.getAnswer() != null && !q.getAnswer().isBlank()) {
+            sb.append("\n标准答案：").append(q.getAnswer());
+        }
+        if (answerText != null && !answerText.isBlank()) {
+            sb.append("\n学生作答：").append(answerText);
+        }
+        sb.append("\n请结合学生作答文字及答题图片判断对错，并给出批改说明。");
+
+        ChatRequest request = new ChatRequest();
+        ChatRequest.Message msg = new ChatRequest.Message();
+        msg.setRole("user");
+        msg.setContent(sb.toString());
+        request.setMessages(List.of(msg));
+        if (imageUrl != null && !imageUrl.isBlank()) {
+            request.setImageUrl(imageUrl);
+        }
+        return request;
+    }
+
+    /** 从 AI 返回文本中解析 {correct, result}，失败时启发式兜底 */
+    private GradeParse parseGradeResult(String aiResult) {
+        String json = aiResult != null ? aiResult.trim() : "";
+        try {
+            int start = json.indexOf('{');
+            int end = json.lastIndexOf('}');
+            if (start < 0 || end <= start) {
+                throw new IllegalArgumentException("非 JSON 输出");
+            }
+            JsonNode node = OBJECT_MAPPER.readTree(json.substring(start, end + 1));
+            Boolean correct = node.has("correct") && !node.get("correct").isNull()
+                    ? node.get("correct").asBoolean() : null;
+            String result = node.has("result") && !node.get("result").isNull()
+                    ? node.get("result").asText() : null;
+            if (correct == null) {
+                correct = json.contains("正确") && !json.contains("不正确") && !json.contains("错误");
+            }
+            if (result == null || result.isBlank()) {
+                result = aiResult;
+            }
+            return new GradeParse(correct, result);
+        } catch (Exception e) {
+            log.warn("批改结果解析失败，原文兜底: {}", e.getMessage());
+            boolean correct = json.contains("正确") && !json.contains("错误");
+            return new GradeParse(correct, aiResult != null ? aiResult : "批改失败");
+        }
+    }
+
+    /** 从文件名提取扩展名（非法时兜底 png） */
+    private String extractFileExt(String filename) {
+        if (filename == null || !filename.contains(".")) return "png";
+        String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+        return ext.matches("[a-z0-9]{1,5}") ? ext : "png";
+    }
+
+    private record GradeParse(boolean correct, String result) {}
 }

@@ -51,31 +51,47 @@ public class ImageStorageService {
             String base64 = value.substring(comma + 1).trim();
             String ext = extractExt(header);
             byte[] bytes = Base64.getDecoder().decode(base64);
-
-            String dateDir = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
-            String name = UUID.randomUUID().toString() + "." + ext;
-            String key = "question-images/" + subDir + "/" + dateDir + "/" + name;
-
-            // 优先上传 COS，图片流量卸载到对象存储，减轻 ECS 带宽
-            String cosUrl = cosStorageService.upload(bytes, key);
-            if (cosUrl != null) {
-                return cosUrl;
-            }
-
-            // COS 未配置 / 失败 → 回退本地磁盘
-            Path dir = Path.of(uploadDir, "question-images", subDir, dateDir)
-                    .toAbsolutePath().normalize();
-            Files.createDirectories(dir);
-            Path target = dir.resolve(name);
-            Files.write(target, bytes);
-
-            String url = "/uploads/question-images/" + subDir + "/" + dateDir + "/" + name;
-            log.info("图片落盘(本地): {} bytes → {}", bytes.length, url);
-            return url;
+            return store(bytes, ext, subDir);
         } catch (Exception e) {
             log.warn("图片落盘失败，保留 base64 原值: {}", e.getMessage());
             return value;
         }
+    }
+
+    /**
+     * 存储二进制图片字节（multipart 上传等非 base64 场景），返回 web URL；失败返回 null。
+     */
+    public String persistBytes(byte[] bytes, String ext, String subDir) {
+        try {
+            return store(bytes, ext, subDir);
+        } catch (Exception e) {
+            log.warn("图片落盘失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 公共存储逻辑：优先 COS，回退本地磁盘 */
+    private String store(byte[] bytes, String ext, String subDir) throws java.io.IOException {
+        String dateDir = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+        String name = UUID.randomUUID().toString() + "." + ext;
+        String key = "question-images/" + subDir + "/" + dateDir + "/" + name;
+
+        // 优先上传 COS，图片流量卸载到对象存储，减轻 ECS 带宽
+        String cosUrl = cosStorageService.upload(bytes, key);
+        if (cosUrl != null) {
+            return cosUrl;
+        }
+
+        // COS 未配置 / 失败 → 回退本地磁盘
+        Path dir = Path.of(uploadDir, "question-images", subDir, dateDir)
+                .toAbsolutePath().normalize();
+        Files.createDirectories(dir);
+        Path target = dir.resolve(name);
+        Files.write(target, bytes);
+
+        String url = "/uploads/question-images/" + subDir + "/" + dateDir + "/" + name;
+        log.info("图片落盘(本地): {} bytes → {}", bytes.length, url);
+        return url;
     }
 
     /** 从 {@code data:image/xxx;base64} 头提取扩展名 */

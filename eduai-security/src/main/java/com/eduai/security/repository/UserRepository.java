@@ -1,7 +1,11 @@
 package com.eduai.security.repository;
 
 import com.eduai.security.entity.User;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
@@ -31,4 +35,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** 按角色类型统计用户数 */
     long countByRoleType(Integer roleType);
+
+    /**
+     * 按 ID 加悲观写锁查询（SELECT ... FOR UPDATE），用于智学点扣减等需防并发超扣的场景。
+     * 必须在事务内调用，否则锁立即释放无效。
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
 }

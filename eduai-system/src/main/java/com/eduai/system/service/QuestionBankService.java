@@ -2,9 +2,11 @@ package com.eduai.system.service;
 
 import com.eduai.system.dto.QuestionUpdateDTO;
 import com.eduai.system.dto.QuestionUploadDTO;
+import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
 import com.eduai.system.vo.StudentBriefVO;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -84,4 +86,14 @@ public interface QuestionBankService {
      * @return 随机打乱的同知识点题目列表
      */
     List<QuestionVO> listSimilarQuestions(String subject, Long kpId, int count, Long excludeId);
+
+    /**
+     * 题目 AI 批改（扣 5 智学点）。
+     *
+     * @param questionId 题目ID
+     * @param file       学生作答图片（multipart，必填）
+     * @param answerText 学生作答文字（可选）
+     * @return 批改结果 {@code {correct, result}}；重复提交返回缓存且不重复扣点
+     */
+    GradeResultVO gradeQuestion(Long questionId, MultipartFile file, String answerText);
 }
