@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * 全局异常处理
@@ -92,6 +93,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleAsyncTimeout(AsyncRequestTimeoutException e) {
         log.debug("SSE 异步请求超时（客户端断开或流式响应超过 emitter 超时）");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Result.error("服务器内部错误"));
+    }
+
+    /** 静态资源/未知路径不存在（Spring Boot 3.2+ 对缺失静态资源抛 NoResourceFoundException）——降级为 debug，正确返回 404 */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Result<Void>> handleNoResource(NoResourceFoundException e) {
+        log.debug("静态资源不存在: {}", e.getResourcePath());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Result.notFound("资源不存在"));
     }
 
     /** 兜底异常 */
