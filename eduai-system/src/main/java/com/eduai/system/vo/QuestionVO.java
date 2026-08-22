@@ -42,6 +42,9 @@ public class QuestionVO {
     private String solution;
     private String similarJson;
 
+    // 上次作答（「不批改，直接保存」的存档图片，跨刷新持久化用）
+    private String lastAnswerImageUrl;
+
     // 老师解析
     private String teacherAnalysis;
     private String teacherAnalysisImage;

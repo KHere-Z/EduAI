@@ -5,6 +5,7 @@ import com.eduai.system.dto.QuestionUploadDTO;
 import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
+import com.eduai.system.vo.SaveAnswerVO;
 import com.eduai.system.vo.StudentBriefVO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -106,4 +107,24 @@ public interface QuestionBankService {
      * @return 批改结果 {@code {correct, result}}；重复提交返回缓存且不重复扣点
      */
     GradeResultVO gradeQuestion(Long questionId, MultipartFile file, String answerText);
+
+    /**
+     * 保存学生答案（只保存、不批改、不扣点）。
+     * <p>
+     * 按 {@code (questionId, studentId)} 覆盖式保存最近一次作答图片/文字，供「不批改直接保存」
+     * 及跨刷新恢复上次作答使用。
+     *
+     * @param questionId 题目ID
+     * @param file       学生作答图片（multipart）
+     * @param answerText 学生作答文字（可选）
+     * @return 保存结果 {@code {questionId, answerImageUrl, answerText}}
+     */
+    SaveAnswerVO saveAnswer(Long questionId, MultipartFile file, String answerText);
+
+    /**
+     * 删除学生答案存档（只删 answer 存档，不涉及批改记录）。
+     * <p>
+     * 归属校验与保存一致：错题仅本人可删、共享新题所有学生可删。删除不存在的记录时静默成功（幂等）。
+     */
+    void deleteAnswer(Long questionId);
 }

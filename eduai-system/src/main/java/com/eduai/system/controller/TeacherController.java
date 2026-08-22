@@ -26,8 +26,11 @@ public class TeacherController {
      */
     @GetMapping("/math-students")
     public Result<List<StudentBriefVO>> listMathStudents() {
-        // student_enrollment.subject 存的是中文（"数学"），不是英文编码
-        return Result.ok(questionBankService.listTeacherStudents("数学"));
+        // 学生绑定关系以 teacher_student 表为准（管理员内定 + uid 账号绑定两套流程都写它）。
+        // 学科信息现存在 students.subjects(英文JSON)/teachers.subject_ids(英文逗号分隔)，
+        // 而 student_enrollment 是旧版 StudentService 才维护的孤儿表，此处不再按学科过滤，
+        // 否则两套绑定流程下该下拉都会恒空。
+        return Result.ok(questionBankService.listTeacherStudents(null));
     }
 
     /**

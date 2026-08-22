@@ -14,6 +14,7 @@ import com.eduai.system.entity.Question;
 import com.eduai.system.entity.QuestionGradeRecord;
 import com.eduai.system.entity.QuestionKnowledgePoint;
 import com.eduai.system.entity.Student;
+import com.eduai.system.entity.StudentAnswer;
 import com.eduai.system.entity.StudentEnrollment;
 import com.eduai.system.entity.StudentQuestionProgress;
 import com.eduai.system.entity.TeacherStudent;
@@ -21,6 +22,7 @@ import com.eduai.system.repository.KnowledgePointRepository;
 import com.eduai.system.repository.QuestionGradeRecordRepository;
 import com.eduai.system.repository.QuestionKnowledgePointRepository;
 import com.eduai.system.repository.QuestionRepository;
+import com.eduai.system.repository.StudentAnswerRepository;
 import com.eduai.system.repository.StudentEnrollmentRepository;
 import com.eduai.system.repository.StudentQuestionProgressRepository;
 import com.eduai.system.repository.StudentRepository;
@@ -30,6 +32,7 @@ import com.eduai.system.service.QuestionBankService;
 import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
 import com.eduai.system.vo.QuestionVO;
+import com.eduai.system.vo.SaveAnswerVO;
 import com.eduai.system.vo.StudentBriefVO;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +74,7 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     private final PointService pointService;
     private final AIChatService aiChatService;
     private final QuestionGradeRecordRepository questionGradeRecordRepository;
+    private final StudentAnswerRepository studentAnswerRepository;
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
@@ -410,8 +414,9 @@ public class QuestionBankServiceImpl implements QuestionBankService {
         }
 
         Map<Long, String> kpNameMap = resolveKpNameMap(questionPage.getContent());
+        Map<Long, String> answerImageMap = buildAnswerImageMap(student, questionPage.getContent());
         List<QuestionVO> list = questionPage.getContent().stream()
-                .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap))
+                .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap, answerImageMap))
                 .collect(Collectors.toList());
 
         return QuestionPageVO.builder()
@@ -486,8 +491,9 @@ public class QuestionBankServiceImpl implements QuestionBankService {
         log.info("学生新题查询: subject={}, gradeList={}, 结果={}条", subject, gradeList, questionPage.getTotalElements());
 
         Map<Long, String> kpNameMap = resolveKpNameMap(questionPage.getContent());
+        Map<Long, String> answerImageMap = buildAnswerImageMap(student, questionPage.getContent());
         List<QuestionVO> list = questionPage.getContent().stream()
-                .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap))
+                .map(q -> toVO(q, Collections.emptyMap(), Collections.emptyMap(), kpNameMap, answerImageMap))
                 .collect(Collectors.toList());
         // 共享新题的掌握度/完成状态按学生隔离，覆盖当前学生进度
         overlayProgress(list, student.getId());
@@ -607,6 +613,12 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     /** Question → QuestionVO */
     private QuestionVO toVO(Question q, Map<Long, String> studentNameMap,
                             Map<Long, String> teacherNameMap, Map<Long, String> kpNameMap) {
+        return toVO(q, studentNameMap, teacherNameMap, kpNameMap, Collections.emptyMap());
+    }
+
+    private QuestionVO toVO(Question q, Map<Long, String> studentNameMap,
+                            Map<Long, String> teacherNameMap, Map<Long, String> kpNameMap,
+                            Map<Long, String> answerImageMap) {
         String studentName = q.getStudentId() != null
                 ? studentNameMap.getOrDefault(q.getStudentId(), null)
                 : null;
@@ -634,6 +646,7 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .analysis(q.getAnalysis())
                 .solution(q.getSolution())
                 .similarJson(q.getSimilarJson())
+                .lastAnswerImageUrl(answerImageMap != null ? answerImageMap.get(q.getId()) : null)
                 .teacherAnalysis(q.getTeacherAnalysis())
                 .teacherAnalysisImage(q.getTeacherAnalysisImage())
                 .teacherAnalysisImageType(q.getTeacherAnalysisImageType())
@@ -647,6 +660,15 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .createdAt(q.getCreatedAt())
                 .updatedAt(q.getUpdatedAt())
                 .build();
+    }
+
+    /** 批量取当前学生在这些题目上的「上次作答图片」映射：questionId → answerImageUrl */
+    private Map<Long, String> buildAnswerImageMap(Student student, List<Question> questions) {
+        Set<Long> qids = questions.stream().map(Question::getId).collect(Collectors.toSet());
+        if (qids.isEmpty()) return Collections.emptyMap();
+        return studentAnswerRepository.findByStudentIdAndQuestionIdIn(student.getId(), qids).stream()
+                .filter(a -> a.getAnswerImageUrl() != null && !a.getAnswerImageUrl().isBlank())
+                .collect(Collectors.toMap(StudentAnswer::getQuestionId, StudentAnswer::getAnswerImageUrl, (a, b) -> a));
     }
 
     // ==================== 学生错题录入 ====================
@@ -896,6 +918,82 @@ public class QuestionBankServiceImpl implements QuestionBankService {
                 .result(pr.result())
                 .cached(false)
                 .build();
+    }
+
+    /**
+     * 保存学生答案（只保存、不批改、不扣点）。
+     * <p>
+     * 按 {@code (questionId, studentId)} 覆盖式保存最近一次作答图片/文字，供「不批改直接保存」及跨刷新恢复使用。
+     */
+    @Override
+    @Transactional
+    public SaveAnswerVO saveAnswer(Long questionId, MultipartFile file, String answerText) {
+        Student student = checkStudent();
+
+        Question q = questionRepository.findById(questionId)
+                .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+
+        // 越权校验：错题(studentId 非空)仅本人可保存；共享新题(studentId 空)所有学生可保存
+        if (q.getStudentId() != null && !q.getStudentId().equals(student.getId())) {
+            throw new BusinessException(403, "无权保存该题答案");
+        }
+
+        // 答题图片落盘（multipart → COS / 本地）
+        String imageUrl = null;
+        if (file != null && !file.isEmpty()) {
+            byte[] bytes;
+            try {
+                bytes = file.getBytes();
+            } catch (IOException e) {
+                throw new BusinessException(400, "答题图片读取失败");
+            }
+            imageUrl = imageStorageService.persistBytes(bytes, extractFileExt(file.getOriginalFilename()), "answer");
+        }
+
+        // 覆盖式保存：命中则更新，否则新建
+        StudentAnswer answer = studentAnswerRepository
+                .findByQuestionIdAndStudentId(questionId, student.getId())
+                .orElseGet(() -> StudentAnswer.builder()
+                        .questionId(questionId)
+                        .studentId(student.getId())
+                        .build());
+        if (imageUrl != null) {
+            answer.setAnswerImageUrl(imageUrl);
+        }
+        if (answerText != null) {
+            answer.setAnswerText(answerText);
+        }
+        answer = studentAnswerRepository.save(answer);
+
+        log.info("学生{} 保存答案(不批改): questionId={}", student.getId(), questionId);
+        return SaveAnswerVO.builder()
+                .questionId(questionId)
+                .answerImageUrl(answer.getAnswerImageUrl())
+                .answerText(answer.getAnswerText())
+                .build();
+    }
+
+    /**
+     * 删除学生答案存档（只删 answer 存档，不涉及批改记录）。
+     * <p>
+     * 归属校验与保存一致：错题仅本人可删、共享新题所有学生可删。幂等：无记录时静默成功。
+     */
+    @Override
+    @Transactional
+    public void deleteAnswer(Long questionId) {
+        Student student = checkStudent();
+
+        Question q = questionRepository.findById(questionId)
+                .orElseThrow(() -> new BusinessException(404, "题目不存在"));
+
+        // 越权校验：错题(studentId 非空)仅本人可删；共享新题(studentId 空)所有学生可删
+        if (q.getStudentId() != null && !q.getStudentId().equals(student.getId())) {
+            throw new BusinessException(403, "无权删除该题答案");
+        }
+
+        studentAnswerRepository.findByQuestionIdAndStudentId(questionId, student.getId())
+                .ifPresent(studentAnswerRepository::delete);
+        log.info("学生{} 删除答案: questionId={}", student.getId(), questionId);
     }
 
     /** 构建批改 ChatRequest：题目 + 标准答案 + 学生作答文字 + 答题图片 */
