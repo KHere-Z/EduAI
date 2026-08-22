@@ -11,6 +11,7 @@ import com.eduai.system.repository.ExamPaperRepository;
 import com.eduai.system.repository.StudentRepository;
 import com.eduai.system.repository.TeacherStudentRepository;
 import com.eduai.system.service.ExamPaperService;
+import com.eduai.system.service.ImageStorageService;
 import com.eduai.system.vo.ExamPaperVO;
 import com.lowagie.text.DocumentException;
 import com.lowagie.text.pdf.BaseFont;
@@ -58,6 +59,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
     private final UserRepository userRepository;
     private final StudentRepository studentRepository;
     private final TeacherStudentRepository teacherStudentRepository;
+    private final ImageStorageService imageStorageService;
 
     /** 上传目录（限制本地图片读取范围，防止任意文件读取） */
     @Value("${eduai.upload.dir:uploads}")
@@ -120,10 +122,13 @@ public class ExamPaperServiceImpl implements ExamPaperService {
     public ExamPaperVO createExamPaper(ExamPaperDTO dto) {
         Student student = getCurrentStudent();
 
-        // paperImages 列表 → 逗号分隔
+        // paperImages 列表 → base64 落盘/落 COS 转 URL → 逗号分隔
+        // （前端传 base64 会撞 paper_images TEXT 64KB 上限，此处统一转 URL 存库）
         String imagesStr = null;
         if (dto.getPaperImages() != null && !dto.getPaperImages().isEmpty()) {
-            imagesStr = String.join(",", dto.getPaperImages());
+            imagesStr = dto.getPaperImages().stream()
+                    .map(img -> imageStorageService.persistIfBase64(img, "exam"))
+                    .collect(Collectors.joining(","));
         }
 
         ExamPaper paper = ExamPaper.builder()

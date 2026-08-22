@@ -7,6 +7,7 @@ import com.eduai.ai.dto.UploadResponse;
 import com.eduai.ai.service.AIChatService;
 import com.eduai.common.Result;
 import com.eduai.common.annotation.RateLimit;
+import com.eduai.common.storage.CosStorageService;
 import com.eduai.security.service.PointService;
 import com.eduai.security.service.impl.PointServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +47,7 @@ public class AIController {
 
     private final AIChatService aiChatService;
     private final PointService pointService;
+    private final CosStorageService cosStorageService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -292,10 +294,19 @@ public class AIController {
      */
     private Result<UploadResponse> saveFile(byte[] bytes, String originalName, String ext) throws IOException {
         String dateDir = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+        String storedName = UUID.randomUUID().toString() + "." + ext;
+        String key = "ai/" + dateDir + "/" + storedName;
+
+        // 优先上传 COS，图片流量卸载到对象存储，减轻 ECS 带宽
+        String cosUrl = cosStorageService.upload(bytes, key);
+        if (cosUrl != null) {
+            log.info("✅ 文件已上传 COS: {} → {} ({} bytes)", originalName, cosUrl, bytes.length);
+            return Result.ok(new UploadResponse(cosUrl, originalName));
+        }
+
+        // COS 未配置 / 失败 → 回退本地磁盘
         Path basePath = Paths.get(uploadDir).toAbsolutePath().normalize();
         Path dir = basePath.resolve("ai").resolve(dateDir);
-
-        String storedName = UUID.randomUUID().toString() + "." + ext;
         Path target = dir.resolve(storedName);
 
         // 双重确保父目录存在
@@ -305,7 +316,7 @@ public class AIController {
         Files.write(target, bytes);
 
         String url = "/uploads/ai/" + dateDir + "/" + storedName;
-        log.info("✅ 文件保存成功: {} → {} ({} bytes, 路径: {})",
+        log.info("✅ 文件保存成功(本地): {} → {} ({} bytes, 路径: {})",
                 originalName, url, bytes.length, target.toAbsolutePath());
 
         return Result.ok(new UploadResponse(url, originalName));

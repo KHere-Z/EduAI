@@ -727,6 +727,10 @@ public class QuestionBankServiceImpl implements QuestionBankService {
     /** 重建题目-知识点关联：先清后写（与 knowledge_point_ids CSV 列保持同步） */
     private void replaceKnowledgePointLinks(Long questionId, String kpIdsCsv) {
         questionKnowledgePointRepository.deleteByQuestionId(questionId);
+        // 强制 flush：派生删除(deleteByQuestionId)与后续 saveAll 在同一事务时，
+        // Hibernate 默认 flush 顺序是 insert 先于 delete，若新旧关联存在重叠 kpId
+        // 会撞 question_knowledge_point.uk_question_kp 唯一约束，必须先让 DELETE 落库
+        questionKnowledgePointRepository.flush();
         if (kpIdsCsv == null || kpIdsCsv.isBlank()) return;
         Set<Long> ids = Arrays.stream(kpIdsCsv.split(","))
                 .map(String::trim)

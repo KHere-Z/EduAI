@@ -25,6 +25,7 @@
         <knife4j.version>4.5.0</knife4j.version>
         <mapstruct.version>1.6.3</mapstruct.version>
         <easyexcel.version>4.0.3</easyexcel.version>
+        <cos.version>5.6.249</cos.version>
     </properties>
 
     <modules>
@@ -52,6 +53,8 @@
         <dependency><groupId>org.projectlombok</groupId><artifactId>lombok</artifactId><optional>true</optional></dependency>
         <dependency><groupId>org.mapstruct</groupId><artifactId>mapstruct</artifactId><version>${mapstruct.version}</version></dependency>
         <dependency><groupId>com.alibaba</groupId><artifactId>easyexcel</artifactId><version>${easyexcel.version}</version></dependency>
+        <!-- 腾讯云 COS 对象存储（图片落 COS，卸载 ECS 带宽） -->
+        <dependency><groupId>com.qcloud</groupId><artifactId>cos_api</artifactId><version>${cos.version}</version></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
     </dependencies>
 

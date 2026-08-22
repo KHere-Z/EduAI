@@ -1,5 +1,7 @@
 package com.eduai.system.service;
 
+import com.eduai.common.storage.CosStorageService;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -23,7 +25,10 @@ import java.util.UUID;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class ImageStorageService {
+
+    private final CosStorageService cosStorageService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -48,16 +53,24 @@ public class ImageStorageService {
             byte[] bytes = Base64.getDecoder().decode(base64);
 
             String dateDir = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+            String name = UUID.randomUUID().toString() + "." + ext;
+            String key = "question-images/" + subDir + "/" + dateDir + "/" + name;
+
+            // 优先上传 COS，图片流量卸载到对象存储，减轻 ECS 带宽
+            String cosUrl = cosStorageService.upload(bytes, key);
+            if (cosUrl != null) {
+                return cosUrl;
+            }
+
+            // COS 未配置 / 失败 → 回退本地磁盘
             Path dir = Path.of(uploadDir, "question-images", subDir, dateDir)
                     .toAbsolutePath().normalize();
             Files.createDirectories(dir);
-
-            String name = UUID.randomUUID().toString() + "." + ext;
             Path target = dir.resolve(name);
             Files.write(target, bytes);
 
             String url = "/uploads/question-images/" + subDir + "/" + dateDir + "/" + name;
-            log.info("图片落盘: {} bytes → {}", bytes.length, url);
+            log.info("图片落盘(本地): {} bytes → {}", bytes.length, url);
             return url;
         } catch (Exception e) {
             log.warn("图片落盘失败，保留 base64 原值: {}", e.getMessage());
