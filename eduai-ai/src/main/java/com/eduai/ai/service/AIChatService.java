@@ -8,9 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -28,7 +26,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import javax.imageio.ImageIO;
 
@@ -45,29 +42,34 @@ public class AIChatService {
     private final DeepSeekConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** AI 异步执行线程池（替换裸 new Thread，避免无界线程） */
-    @Qualifier("aiTaskExecutor")
-    private final Executor aiTaskExecutor;
-
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
 
     private static final MediaType JSON = MediaType.get("application/json; charset=utf-8");
 
+    /** 共享 Dispatcher：放大 AI 并发上限（默认每主机仅 5，会卡死 100+ 并发） */
+    private static final Dispatcher AI_DISPATCHER = new Dispatcher();
+    static {
+        AI_DISPATCHER.setMaxRequests(300);          // 全局在途请求上限
+        AI_DISPATCHER.setMaxRequestsPerHost(200);   // 单主机（DeepSeek/Doubao）并发上限
+    }
+
     /** 共享 OkHttpClient（连接池复用，避免每次新建 TCP+TLS 握手）；DeepSeek 错题分析最多 10 分钟 */
     private final OkHttpClient httpClient = new OkHttpClient.Builder()
+            .dispatcher(AI_DISPATCHER)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(600, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .connectionPool(new okhttp3.ConnectionPool(10, 5, TimeUnit.MINUTES))
+            .connectionPool(new okhttp3.ConnectionPool(200, 5, TimeUnit.MINUTES))
             .build();
 
     /** Doubao 专用 client（更长超时，独立连接池）；豆包试卷分析 5-10 分钟，读到 20 分钟 */
     private final OkHttpClient doubaoHttpClient = new OkHttpClient.Builder()
+            .dispatcher(AI_DISPATCHER)
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(1200, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
-            .connectionPool(new okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
+            .connectionPool(new okhttp3.ConnectionPool(200, 5, TimeUnit.MINUTES))
             .build();
 
     /** 模型上下文上限（留 200K 余量给响应） */
@@ -153,81 +155,84 @@ public class AIChatService {
 
         SseEmitter emitter = new SseEmitter(600_000L); // 10 分钟超时（错题分析/通用聊天，DeepSeek）
 
-        aiTaskExecutor.execute(() -> {
-            try {
-                String normalizedUrl = effectiveUrl.replaceAll("/+$", "");
-                String fullUrl = normalizedUrl + "/chat/completions";
-                String apiKey = effectiveKey;
-                String jsonBody = objectMapper.writeValueAsString(body);
+        try {
+            String normalizedUrl = effectiveUrl.replaceAll("/+$", "");
+            String fullUrl = normalizedUrl + "/chat/completions";
+            String jsonBody = objectMapper.writeValueAsString(body);
 
-                log.info("SSE 流式请求: model={}, url={}, messagesCount={}, bodySize={}",
-                        effectiveModel, effectiveUrl,
-                        messages.size(), jsonBody.length());
+            log.info("SSE 流式请求: model={}, url={}, messagesCount={}, bodySize={}",
+                    effectiveModel, effectiveUrl,
+                    messages.size(), jsonBody.length());
 
-                OkHttpClient client = httpClient;
+            okhttp3.Request httpRequest = new okhttp3.Request.Builder()
+                    .url(fullUrl)
+                    .addHeader("Authorization", "Bearer " + effectiveKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(okhttp3.RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
+                    .build();
 
-                okhttp3.Request httpRequest = new okhttp3.Request.Builder()
-                        .url(fullUrl)
-                        .addHeader("Authorization", "Bearer " + apiKey)
-                        .addHeader("Content-Type", "application/json")
-                        .post(okhttp3.RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
-                        .build();
-
-                try (okhttp3.Response response = client.newCall(httpRequest).execute()) {
-                    if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        log.error("SSE 流式请求失败: HTTP {} body={}", response.code(),
-                                errorBody.length() > 500 ? errorBody.substring(0, 500) : errorBody);
-                        emitter.send(SseEmitter.event().data("[ERROR] AI 调用失败：" + parseError(errorBody)));
-                        emitter.complete();
-                        return;
-                    }
-
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8));
-                    String line;
-                    int tokenCount = 0;
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ") && !"data: [DONE]".equals(line.trim())) {
-                            String data = line.substring(6);
-                            try {
-                                var node = objectMapper.readTree(data);
-                                var choices = node.get("choices");
-                                if (choices != null && !choices.isEmpty()) {
-                                    var delta = choices.get(0).get("delta");
-                                    if (delta != null && delta.has("content")) {
-                                        String content = delta.get("content").asText();
-                                        if (!content.isEmpty()) {
-                                            // JSON 编码 token，保留 markdown 换行/特殊字符，前端 JSON.parse 还原
-                                            String safe = objectMapper.writeValueAsString(content);
-                                            emitter.send(SseEmitter.event().data(safe));
-                                            tokenCount++;
-                                        }
-                                    }
-                                }
-                            } catch (Exception ignored) {
-                                // 跳过无法解析的行
-                            }
-                        }
-                    }
-                    log.info("SSE 流式完成: {} tokens", tokenCount);
-                    emitter.send(SseEmitter.event().data("[DONE]"));
+            httpClient.newCall(httpRequest).enqueue(new Callback() {
+                @Override public void onFailure(Call call, IOException e) {
+                    log.error("SSE 流式中断: {}", e.getMessage());
+                    safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
                     emitter.complete();
                 }
-            } catch (IOException e) {
-                log.error("SSE 流式中断: {}", e.getMessage());
-                try {
-                    emitter.send(SseEmitter.event().data("[ERROR] 网络异常：" + e.getMessage()));
-                    emitter.complete();
-                } catch (IOException ignored) {}
-            } catch (Exception e) {
-                log.error("SSE 流式异常: {}", e.getMessage(), e);
-                try {
-                    emitter.send(SseEmitter.event().data("[ERROR] " + e.getMessage()));
-                    emitter.completeWithError(e);
-                } catch (IOException ignored) {}
-            }
-        });
+                @Override public void onResponse(Call call, Response response) {
+                    try (ResponseBody responseBody = response.body()) {
+                        if (!response.isSuccessful()) {
+                            String errorBody = responseBody != null ? responseBody.string() : "";
+                            log.error("SSE 流式请求失败: HTTP {} body={}", response.code(),
+                                    errorBody.length() > 500 ? errorBody.substring(0, 500) : errorBody);
+                            safeEmit(emitter, "[ERROR] AI 调用失败：" + parseError(errorBody));
+                            emitter.complete();
+                            return;
+                        }
+                        BufferedReader reader = new BufferedReader(
+                                new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8));
+                        String line;
+                        int tokenCount = 0;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("data: ") && !"data: [DONE]".equals(line.trim())) {
+                                String data = line.substring(6);
+                                try {
+                                    var node = objectMapper.readTree(data);
+                                    var choices = node.get("choices");
+                                    if (choices != null && !choices.isEmpty()) {
+                                        var delta = choices.get(0).get("delta");
+                                        if (delta != null && delta.has("content")) {
+                                            String content = delta.get("content").asText();
+                                            if (!content.isEmpty()) {
+                                                // JSON 编码 token，保留 markdown 换行/特殊字符，前端 JSON.parse 还原
+                                                String safe = objectMapper.writeValueAsString(content);
+                                                emitter.send(SseEmitter.event().data(safe));
+                                                tokenCount++;
+                                            }
+                                        }
+                                    }
+                                } catch (Exception ignored) {
+                                    // 跳过无法解析的行
+                                }
+                            }
+                        }
+                        log.info("SSE 流式完成: {} tokens", tokenCount);
+                        emitter.send(SseEmitter.event().data("[DONE]"));
+                        emitter.complete();
+                    } catch (IOException e) {
+                        log.error("SSE 流式中断: {}", e.getMessage());
+                        safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
+                        emitter.complete();
+                    } catch (Exception e) {
+                        log.error("SSE 流式异常: {}", e.getMessage(), e);
+                        safeEmit(emitter, "[ERROR] " + e.getMessage());
+                        emitter.completeWithError(e);
+                    }
+                }
+            });
+        } catch (IOException e) {
+            log.error("SSE 流式请求构造失败: {}", e.getMessage());
+            safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
+            emitter.complete();
+        }
 
         return emitter;
     }
@@ -375,6 +380,63 @@ public class AIChatService {
     }
 
     /**
+     * 调用 Doubao API（非流式，异步 enqueue）— 不占用线程阻塞等待，AI 并发由 OkHttp dispatcher 管
+     */
+    private CompletableFuture<String> callDoubaoApiAsync(Map<String, Object> body, String apiKey) {
+        if (apiKey == null || !apiKey.startsWith("ark-")) {
+            apiKey = loadDoubaoKey();
+        }
+        final String resolvedKey = apiKey;
+
+        String fullUrl = DOUBAO_API_URL;
+        try {
+            String resolvedUrl = config.resolveModel("exam_analysis").get("apiUrl");
+            if (resolvedUrl != null && !resolvedUrl.isBlank()) {
+                fullUrl = resolvedUrl;
+            }
+        } catch (Exception ignored) {}
+
+        CompletableFuture<String> future = new CompletableFuture<>();
+        try {
+            String jsonBody = objectMapper.writeValueAsString(body);
+            Request httpRequest = new Request.Builder()
+                    .url(fullUrl)
+                    .addHeader("Authorization", "Bearer " + resolvedKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
+                    .build();
+
+            doubaoHttpClient.newCall(httpRequest).enqueue(new Callback() {
+                @Override public void onFailure(Call call, IOException e) {
+                    log.error("Doubao 网络异常: {}", e.getMessage(), e);
+                    future.completeExceptionally(new BusinessException(500, "AI 调用失败：网络异常 — " + e.getMessage()));
+                }
+                @Override public void onResponse(Call call, Response response) {
+                    try (ResponseBody rb = response.body()) {
+                        String responseBody = rb != null ? rb.string() : "";
+                        log.info("Doubao 响应: HTTP {} ({} bytes)", response.code(), responseBody.length());
+                        if (!response.isSuccessful()) {
+                            log.error("Doubao API 返回错误: HTTP {} body={}", response.code(),
+                                    responseBody.length() > 500 ? responseBody.substring(0, 500) : responseBody);
+                            future.completeExceptionally(new BusinessException(500, "AI 调用失败：" + parseError(responseBody)));
+                            return;
+                        }
+                        String content = parseDoubaoContent(responseBody);
+                        logTokenUsage(responseBody, body.get("model"));
+                        future.complete(content);
+                    } catch (Exception e) {
+                        log.error("Doubao 异步响应处理异常: {}", e.getMessage(), e);
+                        future.completeExceptionally(e);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            future.completeExceptionally(e);
+        }
+        return future;
+    }
+
+    /**
      * 调用 Doubao API（流式 SSE）
      */
     @SuppressWarnings("unchecked")
@@ -387,71 +449,79 @@ public class AIChatService {
         String fullUrl = DOUBAO_API_URL;
         SseEmitter emitter = new SseEmitter(1_200_000L); // 20 分钟（试卷分析 5-10 分钟，Doubao 较慢）
 
-        aiTaskExecutor.execute(() -> {
-            try {
-                String jsonBody = objectMapper.writeValueAsString(body);
-                log.info("Doubao SSE 流式请求: bodySize={}", jsonBody.length());
+        try {
+            String jsonBody = objectMapper.writeValueAsString(body);
+            log.info("Doubao SSE 流式请求: bodySize={}", jsonBody.length());
 
-                OkHttpClient client = doubaoHttpClient;
+            okhttp3.Request httpRequest = new okhttp3.Request.Builder()
+                    .url(fullUrl)
+                    .addHeader("Authorization", "Bearer " + resolvedKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(okhttp3.RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
+                    .build();
 
-                okhttp3.Request httpRequest = new okhttp3.Request.Builder()
-                        .url(fullUrl)
-                        .addHeader("Authorization", "Bearer " + resolvedKey)
-                        .addHeader("Content-Type", "application/json")
-                        .post(okhttp3.RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
-                        .build();
-
-                try (okhttp3.Response response = client.newCall(httpRequest).execute()) {
-                    if (!response.isSuccessful()) {
-                        String errorBody = response.body() != null ? response.body().string() : "";
-                        log.error("Doubao SSE 请求失败: HTTP {} body={}", response.code(),
-                                errorBody.length() > 500 ? errorBody.substring(0, 500) : errorBody);
-                        emitter.send(SseEmitter.event().data("[ERROR] AI 调用失败：" + parseError(errorBody)));
-                        emitter.complete();
-                        return;
-                    }
-
-                    BufferedReader reader = new BufferedReader(
-                            new InputStreamReader(response.body().byteStream(), StandardCharsets.UTF_8));
-                    String line;
-                    int tokenCount = 0;
-                    boolean firstToken = true;
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ") && !"data: [DONE]".equals(line.trim())) {
-                            long parseStart = System.currentTimeMillis();
-                            String data = line.substring(6);
-                            String token = extractDoubaoToken(data);
-                            if (token != null && !token.isEmpty()) {
-                                // JSON 编码 token，保留 markdown 换行/特殊字符，前端 JSON.parse 还原
-                                String safe = objectMapper.writeValueAsString(token);
-                                emitter.send(SseEmitter.event().data(safe));
-                                long elapsed = System.currentTimeMillis() - parseStart;
-                                if (firstToken) {
-                                    firstToken = false;
-                                    log.info("⏱ Doubao SSE 首token: parse+send {}ms, token={}",
-                                            elapsed, safe.length() > 30 ? safe.substring(0, 30) + "..." : safe);
-                                }
-                                tokenCount++;
-                            } else {
-                                log.trace("Doubao SSE 非token事件: {}",
-                                        data.length() > 100 ? data.substring(0, 100) : data);
-                            }
-                        }
-                    }
-                    log.info("Doubao SSE 流式完成: {} tokens", tokenCount);
-                    emitter.send(SseEmitter.event().data("[DONE]"));
+            doubaoHttpClient.newCall(httpRequest).enqueue(new Callback() {
+                @Override public void onFailure(Call call, IOException e) {
+                    log.error("Doubao SSE 流式中断: {}", e.getMessage());
+                    safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
                     emitter.complete();
                 }
-            } catch (IOException e) {
-                log.error("Doubao SSE 流式中断: {}", e.getMessage());
-                safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
-                emitter.complete();
-            } catch (Exception e) {
-                log.error("Doubao SSE 流式异常: {}", e.getMessage(), e);
-                safeEmit(emitter, "[ERROR] " + e.getMessage());
-                emitter.completeWithError(e);
-            }
-        });
+                @Override public void onResponse(Call call, Response response) {
+                    try (ResponseBody responseBody = response.body()) {
+                        if (!response.isSuccessful()) {
+                            String errorBody = responseBody != null ? responseBody.string() : "";
+                            log.error("Doubao SSE 请求失败: HTTP {} body={}", response.code(),
+                                    errorBody.length() > 500 ? errorBody.substring(0, 500) : errorBody);
+                            safeEmit(emitter, "[ERROR] AI 调用失败：" + parseError(errorBody));
+                            emitter.complete();
+                            return;
+                        }
+                        BufferedReader reader = new BufferedReader(
+                                new InputStreamReader(responseBody.byteStream(), StandardCharsets.UTF_8));
+                        String line;
+                        int tokenCount = 0;
+                        boolean firstToken = true;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("data: ") && !"data: [DONE]".equals(line.trim())) {
+                                long parseStart = System.currentTimeMillis();
+                                String data = line.substring(6);
+                                String token = extractDoubaoToken(data);
+                                if (token != null && !token.isEmpty()) {
+                                    // JSON 编码 token，保留 markdown 换行/特殊字符，前端 JSON.parse 还原
+                                    String safe = objectMapper.writeValueAsString(token);
+                                    emitter.send(SseEmitter.event().data(safe));
+                                    long elapsed = System.currentTimeMillis() - parseStart;
+                                    if (firstToken) {
+                                        firstToken = false;
+                                        log.info("⏱ Doubao SSE 首token: parse+send {}ms, token={}",
+                                                elapsed, safe.length() > 30 ? safe.substring(0, 30) + "..." : safe);
+                                    }
+                                    tokenCount++;
+                                } else {
+                                    log.trace("Doubao SSE 非token事件: {}",
+                                            data.length() > 100 ? data.substring(0, 100) : data);
+                                }
+                            }
+                        }
+                        log.info("Doubao SSE 流式完成: {} tokens", tokenCount);
+                        emitter.send(SseEmitter.event().data("[DONE]"));
+                        emitter.complete();
+                    } catch (IOException e) {
+                        log.error("Doubao SSE 流式中断: {}", e.getMessage());
+                        safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
+                        emitter.complete();
+                    } catch (Exception e) {
+                        log.error("Doubao SSE 流式异常: {}", e.getMessage(), e);
+                        safeEmit(emitter, "[ERROR] " + e.getMessage());
+                        emitter.completeWithError(e);
+                    }
+                }
+            });
+        } catch (IOException e) {
+            log.error("Doubao SSE 流式请求构造失败: {}", e.getMessage());
+            safeEmit(emitter, "[ERROR] 网络异常：" + e.getMessage());
+            emitter.complete();
+        }
 
         return emitter;
     }
@@ -696,9 +766,8 @@ public class AIChatService {
      * 不预设场景提示词、不强制路由到特定模块：使用全局配置模型，前端可传入自定义
      * systemPrompt 和可选 base64 图片（imageUrl）。对应 AIChat.vue「AI 聊天」页。
      */
-    @Async("aiTaskExecutor")
     public CompletableFuture<String> chat(ChatRequest request) {
-        return CompletableFuture.completedFuture(executeChat(request));
+        return executeChatAsync(request);
     }
 
     /**
@@ -712,7 +781,6 @@ public class AIChatService {
     /**
      * 错题分析 — 带错题场景预设提示词，自动路由到 wrong_analysis 模块的模型
      */
-    @Async("aiTaskExecutor")
     public CompletableFuture<String> analyzeWrongQuestion(ChatRequest request) {
         if (request.getSystemPrompt() == null || request.getSystemPrompt().isBlank()) {
             request.setSystemPrompt(
@@ -732,7 +800,7 @@ public class AIChatService {
         log.info("📝 analyzeWrongQuestion 路由: resolveModel(wrong_analysis) → model={}, url={}, keyPrefix={}",
                 resolved.get("model"), resolved.get("apiUrl"),
                 resolved.get("apiKey") != null ? resolved.get("apiKey").substring(0, Math.min(8, resolved.get("apiKey").length())) + "***" : "NULL");
-        return CompletableFuture.completedFuture(executeChat(request));
+        return executeChatAsync(request);
     }
 
     /**
@@ -763,7 +831,6 @@ public class AIChatService {
     /**
      * 试卷分析 — 带试卷场景预设提示词，自动路由到 exam_analysis 模块的模型
      */
-    @Async("aiTaskExecutor")
     public CompletableFuture<String> analyzeExam(ChatRequest request) {
         if (request.getSystemPrompt() == null || request.getSystemPrompt().isBlank()) {
             request.setSystemPrompt(
@@ -783,7 +850,7 @@ public class AIChatService {
         log.info("📝 analyzeExam 路由: resolveModel(exam_analysis) → model={}, url={}, keyPrefix={}",
                 resolved.get("model"), resolved.get("apiUrl"),
                 resolved.get("apiKey") != null ? resolved.get("apiKey").substring(0, Math.min(8, resolved.get("apiKey").length())) + "***" : "NULL");
-        return CompletableFuture.completedFuture(executeChat(request));
+        return executeChatAsync(request);
     }
 
     /**
@@ -840,6 +907,99 @@ public class AIChatService {
     }
 
     // ==================== 内部方法 ====================
+
+    /**
+     * 执行 AI 调用（异步 enqueue，不占线程阻塞等待）
+     * <p>
+     * 非流式 chat/analyzeWrongQuestion/analyzeExam 走此路径；gradeQuestion 仍需同步阻塞（同事务回滚扣点），不走这里。
+     */
+    private CompletableFuture<String> executeChatAsync(ChatRequest request) {
+        List<Map<String, Object>> messages = trimMessages(buildMessages(request));
+
+        if (isDoubao(request.getModel())) {
+            Map<String, Object> body = buildDoubaoBody(request, false);
+            log.info("Doubao chat 异步请求: model={}, imageCount={}",
+                    getEffectiveModel(request.getModel()), getImageUrls(request).size());
+            return callDoubaoApiAsync(body, getEffectiveApiKey(request.getApiKey()));
+        }
+
+        String effectiveModel = getEffectiveModel(request.getModel());
+        String effectiveUrl = config.resolveApiUrl(effectiveModel);
+        String effectiveKey = config.resolveApiKey(effectiveModel);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", effectiveModel);
+        body.put("messages", messages);
+        body.put("temperature", 1.0);
+        body.put("max_tokens", 4096);
+        body.put("stream", false);
+
+        log.info("AI chat 异步请求: model={}, messagesCount={}, apiUrl={}",
+                effectiveModel, messages.size(), effectiveUrl);
+        return callDeepSeekApiAsync(body, "/chat/completions", effectiveUrl, effectiveKey);
+    }
+
+    /**
+     * 调用 DeepSeek Chat Completions API（OpenAI 兼容，异步 enqueue）
+     * <p>
+     * 不占线程阻塞等待，AI 并发由 OkHttp dispatcher 管。
+     */
+    private CompletableFuture<String> callDeepSeekApiAsync(Map<String, Object> body, String endpoint, String baseUrl, String apiKey) {
+        String normalizedBase = baseUrl.replaceAll("/+$", "");
+        String normalizedEndpoint = endpoint.replaceAll("^/+", "/");
+        String fullUrl = normalizedBase + normalizedEndpoint;
+
+        log.info("🚀 调用 AI API(异步): url={}, model={}, apiKeyPrefix={}",
+                fullUrl, body.get("model"),
+                apiKey != null ? apiKey.substring(0, Math.min(8, apiKey.length())) + "***" : "NULL");
+
+        CompletableFuture<String> future = new CompletableFuture<>();
+        try {
+            String jsonBody = objectMapper.writeValueAsString(body);
+            log.info("AI API 请求体大小: {} bytes", jsonBody.length());
+
+            Request httpRequest = new Request.Builder()
+                    .url(fullUrl)
+                    .addHeader("Authorization", "Bearer " + apiKey)
+                    .addHeader("Content-Type", "application/json")
+                    .post(RequestBody.create(jsonBody.getBytes(StandardCharsets.UTF_8), JSON))
+                    .build();
+
+            httpClient.newCall(httpRequest).enqueue(new Callback() {
+                @Override public void onFailure(Call call, IOException e) {
+                    log.error("AI API 网络异常: {}", e.getMessage(), e);
+                    future.completeExceptionally(new BusinessException(500, "AI 调用失败：网络异常 — " + e.getMessage()));
+                }
+                @Override public void onResponse(Call call, Response response) {
+                    try (ResponseBody responseBody = response.body()) {
+                        String bodyStr = responseBody != null ? responseBody.string() : "";
+                        log.info("AI API 响应: HTTP {} ({} bytes)", response.code(), bodyStr.length());
+                        if (!response.isSuccessful()) {
+                            if (response.code() == 400 && bodyStr.contains("unknown variant `image_url`")) {
+                                log.warn("⚠️ 当前模型不支持图片识别（Vision）：请求中携带图片，且 OCR 服务不可用");
+                                future.completeExceptionally(new BusinessException(500, "题目图片识别失败，请确认 OCR 服务正常后重试，或手动输入题目文字"));
+                                return;
+                            }
+                            log.error("AI API 返回错误: HTTP {} body={}", response.code(),
+                                    bodyStr.length() > 500 ? bodyStr.substring(0, 500) + "..." : bodyStr);
+                            future.completeExceptionally(new BusinessException(500, "AI 调用失败：" + parseError(bodyStr)));
+                            return;
+                        }
+                        String content = parseContent(bodyStr);
+                        logTokenUsage(bodyStr, body.get("model"));
+                        log.info("AI API 返回内容长度: {} chars", content.length());
+                        future.complete(content);
+                    } catch (Exception e) {
+                        log.error("AI API 异步响应处理异常: {}", e.getMessage(), e);
+                        future.completeExceptionally(e);
+                    }
+                }
+            });
+        } catch (Exception e) {
+            future.completeExceptionally(e);
+        }
+        return future;
+    }
 
     /**
      * 调用 DeepSeek Chat Completions API（OpenAI 兼容）

@@ -4,8 +4,10 @@
 spring:
   datasource:
     hikari:
-      maximum-pool-size: 50          # 生产环境提高连接数
-      minimum-idle: 10
+      # 支持 100~500 用户并发 AI：批改(gradeQuestion)在 AI 调用期间长占连接，需放大。
+      # 上限受 MySQL max_connections 约束（默认 151），超过需同步调大 MySQL。
+      maximum-pool-size: 200
+      minimum-idle: 20
 
   jpa:
     show-sql: false                  # 关闭 SQL 输出
