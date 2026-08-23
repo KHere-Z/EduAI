@@ -10,6 +10,9 @@ import com.eduai.security.vo.UserVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.Map;
 
 /**
  * 认证接口
@@ -52,6 +55,12 @@ public class AuthController {
     @PutMapping("/profile")
     public Result<UserVO> updateProfile(@RequestBody UpdateProfileRequest req) {
         return Result.ok(authService.updateProfile(StpUtil.getLoginIdAsLong(), req));
+    }
+
+    /** 上传头像（multipart 单文件）→ 返回 {url} */
+    @PostMapping("/avatar")
+    public Result<Map<String, String>> uploadAvatar(@RequestParam("file") MultipartFile file) {
+        return Result.ok(authService.uploadAvatar(StpUtil.getLoginIdAsLong(), file));
     }
 
     /** 退出登录 */

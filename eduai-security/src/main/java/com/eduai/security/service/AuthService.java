@@ -3,6 +3,9 @@ package com.eduai.security.service;
 import com.eduai.security.dto.*;
 import com.eduai.security.vo.LoginVO;
 import com.eduai.security.vo.UserVO;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.util.Map;
 
 /**
  * 认证服务接口
@@ -20,6 +23,9 @@ public interface AuthService {
 
     /** 更新个人信息 */
     UserVO updateProfile(Long userId, UpdateProfileRequest req);
+
+    /** 上传头像（multipart 单文件），写入 users.avatar，返回 {url} */
+    Map<String, String> uploadAvatar(Long userId, MultipartFile file);
 
     /** 退出登录 */
     void logout();

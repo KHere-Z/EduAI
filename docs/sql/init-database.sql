@@ -63,32 +63,6 @@ CREATE TABLE IF NOT EXISTS `teachers` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='教师信息表';
 
 -- ============================================================
--- 4. 测试数据
--- ============================================================
-
--- 机构
-INSERT INTO `organization` (`id`, `name`, `type`) VALUES (1, '第一实验中学', 1);
-
--- 管理员 (登录密码: admin123，存储为 BCrypt 哈希)
-INSERT INTO `users` (`id`, `username`, `password`, `real_name`, `role_type`, `status`) VALUES
-(1, 'admin', '$2a$10$6DPe6o/Q4K.Z9eRC9/sgveLO.Kjff8vK9yCiXgppdeTnKA/wfBVc2', '系统管理员', 1, 1);
-
--- 教师 (登录密码均为用户名+123，存储为 BCrypt 哈希)
-INSERT INTO `users` (`id`, `username`, `password`, `real_name`, `role_type`, `status`) VALUES
-(2, 'coach',  '$2a$10$6HgbXEq2.XXXfq63tXgcWO8rR/2V/n2tAF8K8fu2wK37iO6PK5lCC', '李老师', 3, 1),
-(3, 'english','$2a$10$uiQZRy1A3kzjVfYRDm95f.3iVLp2dZehTTpubNLXB8yALsAnyq6/S', '王老师', 3, 1),
-(4, 'math',   '$2a$10$XiY90QIL/hTbqPlt7ap3SuTMya3/6fhXmWAsUQ3xHZBBj6l3NnhG2', '张老师', 3, 1),
-(5, 'multi',  '$2a$10$/e9EW2Dm1PD.HyWg2jlOVeYNO40IhDYUonw1er2UXtjii4o1bWrgu', '陈老师', 3, 1),
-(6, 'allsub', '$2a$10$j4lBAt/F6ToqGi7UVZMoDOAr74Qo89P3umN4hI/zZcXQJP6BfD9Zi', '赵老师', 3, 1);
-
--- 教师信息
-INSERT INTO `teachers` (`id`, `user_id`, `subject_ids`, `org_id`, `title`) VALUES
-(1, 2, 'math,physics',          1, '高级教师'),
-(2, 3, 'english',               1, '一级教师'),
-(3, 4, 'math',                  1, '二级教师'),
-(4, 5, 'math,physics,chemistry',1, '特级教师'),
-(5, 6, 'math,physics,chemistry,biology,chinese,english,geography,history,politics', 1, '全科教师');
-
 -- ============================================================
 -- 5. 学生表（v2: 全局唯一，管理员维护基本档案）
 -- ============================================================
@@ -164,7 +138,14 @@ UPDATE `users` SET `password` = '20250423' WHERE `username` = 'zhangshunyi';
 
 
 -- ============================================================
--- 6. 测试账号速查
+-- 6. users 表字段补丁（表已存在时使用，勿重复执行）
+--    头像功能依赖 users.avatar 列；其余缺失字段见 migrate-auth-upgrade.sql
+-- ============================================================
+ALTER TABLE `users`
+    ADD COLUMN `avatar` VARCHAR(500) COMMENT '头像URL' AFTER `real_name`;
+
+-- ============================================================
+-- 7. 测试账号速查
 -- ============================================================
 -- | 用户名   | 密码      | 角色   | 学科              |
 -- | admin   | admin123  | 管理员 | -                 |

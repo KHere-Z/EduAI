@@ -5,6 +5,7 @@ import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.RandomUtil;
 import com.eduai.common.BusinessException;
 import com.eduai.common.Result;
+import com.eduai.common.storage.CosStorageService;
 import com.eduai.common.util.PasswordUtil;
 import com.eduai.security.constant.RedisKeys;
 import com.eduai.security.dto.*;
@@ -26,13 +27,20 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 /**
@@ -54,6 +62,10 @@ public class AuthServiceImpl implements AuthService {
     private final SmsService smsService;
     private final WechatBindingService wechatBindingService;
     private final JdbcTemplate jdbcTemplate;
+    private final CosStorageService cosStorageService;
+
+    @Value("${eduai.upload.dir:uploads}")
+    private String uploadDir;
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -197,6 +209,72 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
         log.info("个人信息已更新: uid={}", user.getUid());
         return toUserVO(user);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, String> uploadAvatar(Long userId, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BusinessException(400, "头像文件不能为空");
+        }
+        // 仅允许图片类型，防止上传任意文件
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BusinessException(400, "头像仅支持图片文件");
+        }
+        // 头像 512×512，限制 5MB 足够
+        if (file.getSize() > 5 * 1024 * 1024) {
+            throw new BusinessException(400, "头像文件不能超过 5MB");
+        }
+
+        String ext = extractExt(contentType, file.getOriginalFilename());
+        byte[] bytes;
+        try {
+            bytes = file.getBytes();
+        } catch (Exception e) {
+            throw new BusinessException(400, "头像文件读取失败");
+        }
+
+        String dateDir = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE);
+        String name = UUID.randomUUID() + "." + ext;
+        String key = "avatars/" + dateDir + "/" + name;
+
+        // 优先 COS，回退本地磁盘（与题库图片一致）
+        String avatarUrl = cosStorageService.upload(bytes, key);
+        if (avatarUrl == null) {
+            try {
+                Path dir = Paths.get(uploadDir).toAbsolutePath().normalize().resolve("avatars").resolve(dateDir);
+                Files.createDirectories(dir);
+                Files.write(dir.resolve(name), bytes);
+                avatarUrl = "/uploads/avatars/" + dateDir + "/" + name;
+            } catch (Exception e) {
+                log.error("头像本地落盘失败: {}", e.getMessage(), e);
+                throw new BusinessException(500, "头像上传失败，请稍后重试");
+            }
+        }
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException("用户不存在"));
+        user.setAvatar(avatarUrl);
+        userRepository.save(user);
+        log.info("头像已更新: uid={}, url={}", user.getUid(), avatarUrl);
+
+        return Map.of("url", avatarUrl);
+    }
+
+    /** 从 Content-Type / 文件名提取扩展名，非法则回退 png */
+    private String extractExt(String contentType, String filename) {
+        if (contentType != null) {
+            if (contentType.contains("png")) return "png";
+            if (contentType.contains("jpeg") || contentType.contains("jpg")) return "jpg";
+            if (contentType.contains("gif")) return "gif";
+            if (contentType.contains("webp")) return "webp";
+        }
+        if (filename != null && filename.contains(".")) {
+            String ext = filename.substring(filename.lastIndexOf('.') + 1).toLowerCase();
+            if (Set.of("png", "jpg", "jpeg", "gif", "webp").contains(ext)) return "jpg".equals(ext) ? "jpg" : ext;
+        }
+        return "png";
     }
 
     @Override
