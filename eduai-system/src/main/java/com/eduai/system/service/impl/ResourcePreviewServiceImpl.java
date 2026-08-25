@@ -335,29 +335,57 @@ public class ResourcePreviewServiceImpl implements ResourcePreviewService {
     /** Office → LibreOffice headless 转 PDF，返回临时 PDF 路径（调用方负责清理父目录） */
     private Path convertOfficeToPdf(Path src) throws Exception {
         Path tmpDir = Files.createTempDirectory("soffice-");
-        ProcessBuilder pb = new ProcessBuilder("soffice", "--headless",
-                "--convert-to", "pdf", "--outdir", tmpDir.toString(), src.toString());
-        pb.redirectErrorStream(true);
-        Process p = pb.start();
-        boolean finished = p.waitFor(120, TimeUnit.SECONDS);
-        if (!finished) {
-            p.destroyForcibly();
-            deleteRecursively(tmpDir);
-            throw new BusinessException(500, "Office 转 PDF 超时");
+        // 独立 user profile：不依赖 HOME（systemd 下 HOME 常不可写，LibreOffice 初始化会报
+        // "User installation could not be completed"），且每进程独立 profile 避免并发转换锁冲突。
+        Path profileDir = Files.createTempDirectory("lo-profile-");
+        Path logFile = tmpDir.resolve("soffice.log");
+        try {
+            ProcessBuilder pb = new ProcessBuilder("soffice", "--headless",
+                    "-env:UserInstallation=file://" + profileDir.toAbsolutePath(),
+                    "--convert-to", "pdf", "--outdir", tmpDir.toString(), src.toString());
+            pb.redirectErrorStream(true);
+            pb.redirectOutput(logFile.toFile());
+            // 关键：HOME 也指向可写临时目录，绕开 /home/eduai 权限导致的 dconf/User installation 失败。
+            pb.environment().put("HOME", profileDir.toString());
+            Process p = pb.start();
+            boolean finished = p.waitFor(120, TimeUnit.SECONDS);
+            if (!finished) {
+                p.destroyForcibly();
+                deleteRecursively(tmpDir);
+                throw new BusinessException(500, "Office 转 PDF 超时");
+            }
+            if (p.exitValue() != 0) {
+                String output = readLog(logFile);
+                log.error("Office 转 PDF 失败 src={} exit={} output={}", src, p.exitValue(), output);
+                deleteRecursively(tmpDir);
+                throw new BusinessException(500, "Office 转 PDF 失败");
+            }
+            String baseName = src.getFileName().toString();
+            int dot = baseName.lastIndexOf('.');
+            String pdfName = (dot > 0 ? baseName.substring(0, dot) : baseName) + ".pdf";
+            Path pdf = tmpDir.resolve(pdfName);
+            if (!Files.exists(pdf)) {
+                String output = readLog(logFile);
+                log.error("Office 转 PDF 未生成输出文件 src={} output={}", src, output);
+                deleteRecursively(tmpDir);
+                throw new BusinessException(500, "Office 转 PDF 未生成输出文件");
+            }
+            return pdf;
+        } finally {
+            deleteRecursively(profileDir);
         }
-        if (p.exitValue() != 0) {
-            deleteRecursively(tmpDir);
-            throw new BusinessException(500, "Office 转 PDF 失败");
+    }
+
+    /** 读取 soffice 输出日志（无/过长则截断），用于失败排障 */
+    private String readLog(Path logFile) {
+        try {
+            if (Files.exists(logFile)) {
+                String s = Files.readString(logFile);
+                return s.length() > 500 ? s.substring(0, 500) : s;
+            }
+        } catch (IOException ignored) {
         }
-        String baseName = src.getFileName().toString();
-        int dot = baseName.lastIndexOf('.');
-        String pdfName = (dot > 0 ? baseName.substring(0, dot) : baseName) + ".pdf";
-        Path pdf = tmpDir.resolve(pdfName);
-        if (!Files.exists(pdf)) {
-            deleteRecursively(tmpDir);
-            throw new BusinessException(500, "Office 转 PDF 未生成输出文件");
-        }
-        return pdf;
+        return "";
     }
 
     /** 加载中文字体（classpath → 系统路径），全失败回退标准字体（英文水印） */
