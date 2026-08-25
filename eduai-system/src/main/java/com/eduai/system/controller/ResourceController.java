@@ -2,6 +2,7 @@ package com.eduai.system.controller;
 
 import com.eduai.common.Result;
 import com.eduai.system.dto.DownloadFile;
+import com.eduai.system.dto.PreviewFile;
 import com.eduai.system.dto.ReorderDTO;
 import com.eduai.system.dto.ResourceChapterDTO;
 import com.eduai.system.dto.ResourceSectionDTO;
@@ -10,6 +11,7 @@ import com.eduai.system.entity.ResourceChapter;
 import com.eduai.system.entity.ResourceSection;
 import com.eduai.system.entity.ResourceTextbook;
 import com.eduai.system.service.ResourceService;
+import com.eduai.system.vo.ArchiveEntryVO;
 import com.eduai.system.vo.ResourceFileVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -178,14 +180,15 @@ public class ResourceController {
             @RequestParam(value = "year", required = false) String year,
             @RequestParam(value = "price", required = false) Integer price,
             @RequestParam(value = "shared", defaultValue = "true") Boolean shared,
+            @RequestParam(value = "previewPaths", required = false) String previewPaths,
             @RequestParam(value = "files", required = false) List<MultipartFile> files,
             @RequestParam(value = "files[]", required = false) List<MultipartFile> filesAlt) {
         List<MultipartFile> allFiles = new ArrayList<>();
         if (files != null) allFiles.addAll(files);
         if (filesAlt != null) allFiles.addAll(filesAlt);
-        log.info("POST /api/v1/resource/resources/upload sectionId={} tag={} year={} price={} shared={} files={}",
-                sectionId, tag, year, price, shared, allFiles.size());
-        return Result.ok(resourceService.uploadResources(sectionId, subject, tag, year, price, shared, allFiles));
+        log.info("POST /api/v1/resource/resources/upload sectionId={} tag={} year={} price={} shared={} previewPaths={} files={}",
+                sectionId, tag, year, price, shared, previewPaths, allFiles.size());
+        return Result.ok(resourceService.uploadResources(sectionId, subject, tag, year, price, shared, previewPaths, allFiles));
     }
 
     /** 删除资源（含磁盘文件） */
@@ -215,5 +218,37 @@ public class ResourceController {
             // 长度未知时省略 Content-Length，仍可流式传输
         }
         return builder.body(df.resource());
+    }
+
+    /** 检查压缩包内部文件清单（仅 zip，上传者可用） */
+    @PostMapping("/archive/inspect")
+    public Result<List<ArchiveEntryVO>> inspectArchive(@RequestParam("file") MultipartFile file) {
+        log.info("POST /api/v1/resource/archive/inspect fileName={}",
+                file != null ? file.getOriginalFilename() : null);
+        return Result.ok(resourceService.inspectArchive(file));
+    }
+
+    /** 预览元信息：{type, url}，无可预览内容时 {type:"none"} */
+    @GetMapping("/resources/{id}/preview")
+    public Result<Map<String, String>> previewResource(@PathVariable Long id) {
+        log.info("GET /api/v1/resource/resources/{}/preview", id);
+        return Result.ok(resourceService.previewResource(id));
+    }
+
+    /** 预览文件流（截断+水印，与原始文件隔离） */
+    @GetMapping("/resources/{id}/preview/file")
+    public ResponseEntity<Resource> previewResourceFile(@PathVariable Long id) {
+        PreviewFile pf = resourceService.previewResourceFile(id);
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
+                .header("Content-Type", pf.contentType());
+        try {
+            long len = pf.resource().contentLength();
+            if (len >= 0) {
+                builder.contentLength(len);
+            }
+        } catch (IOException ignored) {
+            // 长度未知时省略 Content-Length
+        }
+        return builder.body(pf.resource());
     }
 }

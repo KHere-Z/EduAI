@@ -31,6 +31,20 @@
             <version>1.0.7</version>
         </dependency>
 
+        <!-- 预览功能：PDF 截页 + 水印（学习资源 30% 试看） -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
+        <!-- 预览功能：zip 解压（正确处理 UTF-8 中文文件名） -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.26.1</version>
+        </dependency>
+
     </dependencies>
 
     <build>
