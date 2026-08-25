@@ -1,11 +1,11 @@
 # 学习资源预览功能 · 后端工作指引
 
-> 目标：在学习资源模块上增加「30% 试看预览」。前端已完成，本指引与前端约定**完全对齐**，照此实现即可，前端无需再改。
+> 目标：在学习资源模块上增加「试看预览」。前端已完成，本指引与前端约定**完全对齐**，照此实现即可，前端无需再改。
 > 前置：需先完成 `09-resource-backend-guide.md`（`resource_file` 表 + 上传/下载接口）。
 
 ## 1. 需求定稿（已与前端确认，无遗留项）
 
-- **30% 口径**：`ceil(总页数 × 30%)`，常量写死、不可配置；单张图片**只加水印、不截断**。
+- **预览页数口径**：总页数 ≤ 25 → 前 `ceil(总页数 × 20%)` 页（最少 1 页）；总页数 > 25 → 前 5 页。常量写死、不可配置；单张图片**只加水印、不截断**。
 - **压缩包仅 zip**：rar 不支持，后端直接拒绝。
 - **Office 预览直接做**：LibreOffice 转 PDF，**不做**手动传预览图兜底。
 - **预览权限**：所有登录用户可用（复用 `@SaCheckLogin`），下载完整版仍按现有扣费/上传者逻辑。
@@ -84,23 +84,23 @@ ALTER TABLE resource_file
 
 统一流程 `generatePreview(resource)`，按文件类型分派；**首次生成后落盘缓存**，重复请求直接返回缓存。
 
-### 4.1 PDF（截 30% + 水印）
+### 4.1 PDF（截页 + 水印）
 
 - 库：Apache PDFBox（推荐，Java 侧成熟）。
-- 截页数：`int n = Math.max(1, (int) Math.ceil(totalPages * 0.3))`；取前 `n` 页。
-- 水印：每页盖半透明「预览」字样（斜向、居中或平铺均可，保证醒目且遮挡阅读）。
+- 截页数：`int n = totalPages <= 25 ? Math.max(1, (int) Math.ceil(totalPages * 0.2)) : 5;` 取前 `n` 页。
+- 水印：每页盖半透明「智学AI」字样（斜向、居中或平铺均可，保证醒目且遮挡阅读）。
 - 输出：新 PDF，落盘 `uploads/previews/{resourceId}.pdf`。
 
 ### 4.2 图片（只加水印，不截）
 
 - 库：Java2D（`BufferedImage` + `Graphics2D`）。
-- 在图片上叠加半透明「预览」水印（可平铺或居中大字），**不裁剪、不改尺寸**。
+- 在图片上叠加半透明「智学AI」水印（可平铺或居中大字），**不裁剪、不改尺寸**。
 - 输出：`uploads/previews/{resourceId}.png`（或保留原格式）。
 
 ### 4.3 Office（转 PDF 后复用 4.1）
 
 - 工具：LibreOffice headless：`soffice --headless --convert-to pdf --outdir <dir> <file>`。
-- 转出 PDF 后走 4.1 的「30% + 水印」。
+- 转出 PDF 后走 4.1 的「截页 + 水印」。
 - 部署依赖：服务器需装 LibreOffice，并确认 `soffice` 在 PATH。
 
 ### 4.4 压缩包 zip（抽预览入口文件）
@@ -130,9 +130,9 @@ ALTER TABLE resource_file
 ## 7. 验收清单
 
 - [ ] `resource_file` 已加 `preview_path` 列。
-- [ ] 上传 PDF → `GET .../preview` 返回 `type=pdf`，`preview/file` 返回**页数 = ceil(总页×30%)、每页带「预览」水印**的 PDF。
+- [ ] 上传 PDF → `GET .../preview` 返回 `type=pdf`，`preview/file` 返回**页数符合「≤25 页取 20%、>25 页取 5 页」规则、每页带「智学AI」水印**的 PDF。
 - [ ] 上传图片 → `type=image`，带水印、**未被截断**。
-- [ ] 上传 `.docx` → 经 LibreOffice 转 PDF 后返回 30% 水印预览。
+- [ ] 上传 `.docx` → 经 LibreOffice 转 PDF 后返回截页水印预览。
 - [ ] 上传 zip（含多文件）→ `archive/inspect` 返回内部清单与 `previewable`；`preview/file` 返回 `preview_path` 指向文件的预览。
 - [ ] 上传 `.rar` → 上传或 inspect 明确拒绝（提示「仅支持 zip」）。
 - [ ] `preview/file` 未登录返回 401；`download` 仍返回完整文件且正常扣费。
