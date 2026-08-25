@@ -55,6 +55,10 @@ public class ResourceFile {
     @Column(name = "file_path", length = 500)
     private String filePath;
 
+    /** 压缩包内预览入口文件路径（非压缩包为 NULL，由文件自身类型实时判定预览能力） */
+    @Column(name = "preview_path", length = 500)
+    private String previewPath;
+
     /** 文件大小（字节） */
     @Column(name = "file_size")
     private Long fileSize;

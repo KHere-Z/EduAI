@@ -1,12 +1,14 @@
 package com.eduai.system.service;
 
 import com.eduai.system.dto.DownloadFile;
+import com.eduai.system.dto.PreviewFile;
 import com.eduai.system.dto.ResourceChapterDTO;
 import com.eduai.system.dto.ResourceSectionDTO;
 import com.eduai.system.dto.ResourceTextbookDTO;
 import com.eduai.system.entity.ResourceChapter;
 import com.eduai.system.entity.ResourceSection;
 import com.eduai.system.entity.ResourceTextbook;
+import com.eduai.system.vo.ArchiveEntryVO;
 import com.eduai.system.vo.ResourceFileVO;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -54,12 +56,22 @@ public interface ResourceService {
     // ==================== 资源文件 ====================
     List<ResourceFileVO> listResources(Long sectionId, String subject);
 
+    /** 上传资源（多文件），previewPaths 为 JSON 字符串数组，与 files[] 按索引对齐 */
     List<ResourceFileVO> uploadResources(Long sectionId, String subject, String tag,
                                          String year, Integer price, Boolean shared,
-                                         List<MultipartFile> files);
+                                         String previewPaths, List<MultipartFile> files);
 
     void deleteResource(Long id);
 
     /** 下载资源（流式，返回文件名 + 磁盘资源句柄，避免整文件载入内存） */
     DownloadFile downloadResource(Long id);
+
+    /** 检查压缩包内部文件清单（仅 zip，上传者可用） */
+    List<ArchiveEntryVO> inspectArchive(MultipartFile file);
+
+    /** 预览元信息：{type, url}，无可预览内容时 {type:"none"} */
+    Map<String, String> previewResource(Long id);
+
+    /** 预览文件流（截断+水印，与原始文件隔离） */
+    PreviewFile previewResourceFile(Long id);
 }

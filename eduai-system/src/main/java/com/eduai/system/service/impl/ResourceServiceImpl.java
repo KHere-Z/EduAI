@@ -1,6 +1,7 @@
 package com.eduai.system.service.impl;
 
 import cn.dev33.satoken.stp.StpUtil;
+import cn.hutool.json.JSONUtil;
 import com.eduai.common.BusinessException;
 import com.eduai.security.entity.User;
 import com.eduai.security.entity.UserRelation;
@@ -8,6 +9,7 @@ import com.eduai.security.repository.UserRelationRepository;
 import com.eduai.security.repository.UserRepository;
 import com.eduai.security.service.PointService;
 import com.eduai.system.dto.DownloadFile;
+import com.eduai.system.dto.PreviewFile;
 import com.eduai.system.dto.ResourceChapterDTO;
 import com.eduai.system.dto.ResourceSectionDTO;
 import com.eduai.system.dto.ResourceTextbookDTO;
@@ -21,7 +23,9 @@ import com.eduai.system.repository.ResourceDownloadRepository;
 import com.eduai.system.repository.ResourceFileRepository;
 import com.eduai.system.repository.ResourceSectionRepository;
 import com.eduai.system.repository.ResourceTextbookRepository;
+import com.eduai.system.service.ResourcePreviewService;
 import com.eduai.system.service.ResourceService;
+import com.eduai.system.vo.ArchiveEntryVO;
 import com.eduai.system.vo.ResourceFileVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,6 +68,7 @@ public class ResourceServiceImpl implements ResourceService {
     private final UserRelationRepository relationRepository;
     private final ResourceDownloadRepository resourceDownloadRepository;
     private final PointService pointService;
+    private final ResourcePreviewService previewService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -389,7 +394,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     public List<ResourceFileVO> uploadResources(Long sectionId, String subject, String tag,
                                                 String year, Integer price, Boolean shared,
-                                                List<MultipartFile> files) {
+                                                String previewPaths, List<MultipartFile> files) {
         User uploader = checkTeacherOrAdmin();
         sectionRepository.findById(sectionId)
                 .orElseThrow(() -> new BusinessException(404, "小节不存在"));
@@ -400,15 +405,20 @@ public class ResourceServiceImpl implements ResourceService {
 
         boolean isShared = shared == null || shared;
 
+        List<String> previewPathList = parsePreviewPaths(previewPaths);
+
         String author = uploader.getNickname() != null ? uploader.getNickname()
                 : (uploader.getRealName() != null ? uploader.getRealName() : uploader.getUsername());
 
         List<ResourceFileVO> result = new ArrayList<>();
-        for (MultipartFile file : files) {
+        for (int i = 0; i < files.size(); i++) {
+            MultipartFile file = files.get(i);
             if (file == null || file.isEmpty()) {
                 continue;
             }
-            ResourceFile saved = saveFile(sectionId, subject, tag, year, price, isShared, author, uploader.getId(), file);
+            String previewPath = i < previewPathList.size() ? previewPathList.get(i) : null;
+            ResourceFile saved = saveFile(sectionId, subject, tag, year, price, isShared, author,
+                    uploader.getId(), previewPath, file);
             result.add(toVO(saved));
         }
 
@@ -480,16 +490,54 @@ public class ResourceServiceImpl implements ResourceService {
         return new DownloadFile(resource.getFileName(), new FileSystemResource(filePath));
     }
 
+    @Override
+    public List<ArchiveEntryVO> inspectArchive(MultipartFile file) {
+        checkTeacherOrAdmin();
+        return previewService.inspectArchive(file);
+    }
+
+    @Override
+    public Map<String, String> previewResource(Long id) {
+        checkAuthenticated();
+        ResourceFile resource = fileRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "资源不存在"));
+        if (!canReadResource(resource, currentUser())) {
+            throw new BusinessException(403, "无权访问该资源");
+        }
+        String type = previewService.resolvePreviewType(resource);
+        if ("none".equals(type)) {
+            return Map.of("type", "none");
+        }
+        return Map.of("type", type, "url", "/api/v1/resource/resources/" + id + "/preview/file");
+    }
+
+    @Override
+    public PreviewFile previewResourceFile(Long id) {
+        checkAuthenticated();
+        ResourceFile resource = fileRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "资源不存在"));
+        if (!canReadResource(resource, currentUser())) {
+            throw new BusinessException(403, "无权访问该资源");
+        }
+        return previewService.getPreviewFile(resource);
+    }
+
     // ==================== 内部方法 ====================
 
     /** 落盘并入库单个文件 */
     private ResourceFile saveFile(Long sectionId, String subject, String tag, String year,
-                                  Integer price, boolean shared, String author, Long uploaderId, MultipartFile file) {
+                                  Integer price, boolean shared, String author, Long uploaderId,
+                                  String previewPath, MultipartFile file) {
         String originalName = file.getOriginalFilename();
         String ext = "";
         if (originalName != null && originalName.contains(".")) {
             ext = originalName.substring(originalName.lastIndexOf('.')).toLowerCase();
         }
+
+        // 仅 zip 文件存 preview_path，其余置 NULL（预览能力由文件自身类型实时判定）
+        // 注意：此处 ext 含点（如 ".zip"），须与带点比较
+        String effectivePreviewPath = ".zip".equals(ext) && previewPath != null && !previewPath.isBlank()
+                ? previewPath : null;
 
         // 存储路径（相对 uploads/）：uploads/resource/yyyy-MM/uuid.ext
         String dateDir = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
@@ -516,9 +564,23 @@ public class ResourceServiceImpl implements ResourceService {
                 .author(author)
                 .uploaderId(uploaderId)
                 .shared(shared)
+                .previewPath(effectivePreviewPath)
                 .build();
 
         return fileRepository.save(resource);
+    }
+
+    /** 解析 previewPaths JSON 字符串为列表（非法输入返回空列表） */
+    private List<String> parsePreviewPaths(String previewPaths) {
+        if (previewPaths == null || previewPaths.isBlank()) {
+            return new ArrayList<>();
+        }
+        try {
+            return JSONUtil.parseArray(previewPaths).toList(String.class);
+        } catch (Exception e) {
+            log.warn("previewPaths JSON 解析失败，忽略: {}", previewPaths);
+            return new ArrayList<>();
+        }
     }
 
     /** 级联删除某章节下的所有小节及其资源文件 */
