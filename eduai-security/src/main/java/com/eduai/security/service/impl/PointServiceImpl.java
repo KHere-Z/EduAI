@@ -35,18 +35,20 @@ public class PointServiceImpl implements PointService {
     private final PointTransactionRepository transactionRepository;
     private final MembershipRepository membershipRepository;
 
-    // 会员方案配置
+    // 会员方案配置（充值即送固定点数，无折扣）
     private static final Map<String, PlanConfig> PLANS = Map.of(
-            "month",   new PlanConfig("月卡", 500, 0.9),
-            "quarter", new PlanConfig("季卡", 750, 0.7),
-            "year",    new PlanConfig("年卡", 1000, 0.5)
+            "month",    new PlanConfig("月卡", 80),
+            "quarter",  new PlanConfig("季卡", 220),
+            "halfyear", new PlanConfig("半年卡", 420),
+            "year",     new PlanConfig("年卡", 800)
     );
 
     // AI 消耗点数
     public static final int COST_AI_CHAT = 3;
-    public static final int COST_AI_WRONG_ANALYSIS = 5;
-    public static final int COST_AI_EXAM_ANALYSIS = 10;
+    public static final int COST_AI_WRONG_ANALYSIS = 3;
+    public static final int COST_AI_EXAM_ANALYSIS = 5;
     public static final int COST_AI_QUESTION_GRADE = 5;
+    public static final int COST_AI_ANIMATION = 6;
 
     @Override
     public PointVO getPoints(Long userId) {
@@ -137,7 +139,7 @@ public class PointServiceImpl implements PointService {
         }
 
         Membership m = opt.get();
-        PlanConfig config = PLANS.getOrDefault(m.getPlan(), new PlanConfig("未知", 0, 1.0));
+        PlanConfig config = PLANS.getOrDefault(m.getPlan(), new PlanConfig("未知", 0));
 
         boolean isActive = m.getExpiresAt() != null
                 && m.getExpiresAt().isAfter(LocalDateTime.now())
@@ -148,8 +150,8 @@ public class PointServiceImpl implements PointService {
                 .plan(config.name)
                 .startedAt(m.getStartedAt())
                 .expiresAt(m.getExpiresAt())
-                .discount(config.discount)
-                .monthlyPoints(config.monthlyPoints)
+                .discount(1.0)
+                .monthlyPoints(config.giftPoints)
                 .build();
     }
 
@@ -170,14 +172,14 @@ public class PointServiceImpl implements PointService {
 
         if (m != null && "active".equals(m.getStatus()) && m.getExpiresAt() != null && m.getExpiresAt().isAfter(now)) {
             // 续费：延长到期时间
-            LocalDateTime newExpires = m.getExpiresAt().plusMonths("month".equals(plan) ? 1 : "quarter".equals(plan) ? 3 : 12);
+            LocalDateTime newExpires = m.getExpiresAt().plusMonths(planMonths(plan));
             m.setExpiresAt(newExpires);
             m.setPlan(plan);
             m.setUpdatedAt(now);
             membershipRepository.save(m);
         } else {
             // 新开通
-            LocalDateTime expires = now.plusMonths("month".equals(plan) ? 1 : "quarter".equals(plan) ? 3 : 12);
+            LocalDateTime expires = now.plusMonths(planMonths(plan));
             m = Membership.builder()
                     .userId(userId)
                     .plan(plan)
@@ -188,10 +190,10 @@ public class PointServiceImpl implements PointService {
             membershipRepository.save(m);
         }
 
-        // 赠送月度点数
-        charge(userId, config.monthlyPoints, "gift", "开通" + config.name + "赠送 " + config.monthlyPoints + " 点");
+        // 赠送固定点数
+        charge(userId, config.giftPoints, "gift", "开通" + config.name + "赠送 " + config.giftPoints + " 点");
 
-        log.info("会员开通: userId={} plan={} monthlyPoints={}", userId, plan, config.monthlyPoints);
+        log.info("会员开通: userId={} plan={} giftPoints={}", userId, plan, config.giftPoints);
     }
 
     /** 获取会员折扣（非会员返回 1.0） */
@@ -199,5 +201,15 @@ public class PointServiceImpl implements PointService {
         return getMembership(userId).getDiscount();
     }
 
-    private record PlanConfig(String name, int monthlyPoints, double discount) {}
+    /** 方案对应周期（月） */
+    private static int planMonths(String plan) {
+        return switch (plan) {
+            case "quarter" -> 3;
+            case "halfyear" -> 6;
+            case "year" -> 12;
+            default -> 1; // month
+        };
+    }
+
+    private record PlanConfig(String name, int giftPoints) {}
 }

@@ -5,6 +5,8 @@ import com.eduai.ai.config.DeepSeekConfig;
 import com.eduai.ai.dto.ChatRequest;
 import com.eduai.common.BusinessException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.*;
@@ -41,6 +43,10 @@ public class AIChatService {
 
     private final DeepSeekConfig config;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** 用于知识点模板路由（knowledge_template 表查询），沿 AIConfigInitializer 原生 SQL 模式 */
+    @PersistenceContext
+    private EntityManager entityManager;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -82,6 +88,94 @@ public class AIChatService {
     private static final int DOUBAO_MAX_IMAGE_DIMENSION = 1024;
     /** Doubao API 地址（固定） */
     private static final String DOUBAO_API_URL = "https://ark.cn-beijing.volces.com/api/v3/responses";
+    /** 动图（动点题）解析 systemPrompt — 要求豆包只输出几何场景 JSON */
+    private static final String ANIMATION_PROMPT = """
+            你是一个初中数学几何动图解析引擎。用户会给你一道「几何动点题」的图片或文字。
+
+            请仔细读题，识别：
+            1. 图形类型（平行四边形/菱形/三角形/圆…）
+            2. 动点是谁（主动点）、定点是谁、从动点（由动点+约束算出的点）是谁
+            3. 几何约束（角度/边长/平行/旋转/翻折/平移/全等/等边）
+            4. 求解目标（线段最值/面积最值），标注目标线段
+            5. 知识点标签（从预置初中数学考点词典中分类召回，禁止自造）
+
+            然后输出一个 JSON 对象描述这个几何场景，供前端渲染成交互动图。
+
+            JSON 必须严格符合以下结构（所有字段可选，坐标用笛卡尔坐标系，数值只需相对正确）：
+
+            {
+              "meta": {"title":"","question":"","grade":"","subject":"","answer":""},
+              "viewport": {"xmin":0,"xmax":8,"ymin":-1,"ymax":6},
+              "fixedPoints":  [{"name":"A","x":0,"y":0,"label":"A"}],
+              "driverPoints": [{"name":"P","label":"P","param":"AP","range":[0,4],
+                                "track":{"type":"segment","start":"A","through":"B"}}],
+              "drivenPoints": [{"name":"F","label":"F",
+                                "transform":"rotate","center":"E","angle":60,"from":"P"}],
+              "segTarget": {"points":["C","F"],"label":"CF","extremum":"min","showLabel":true},
+              "shapes": [
+                {"type":"polygon","points":["A","B","C","D"],"fill":true},
+                {"type":"segment","points":["A","B"]},
+                {"type":"ray","points":["A","B"]},
+                {"type":"line","points":["C","D"]}
+              ],
+              "auxLines": [{"points":["E","F"]}],
+              "trace": ["F"],
+              "uiConfig": {"showSlider":true,"showLocateMin":true,"showTrace":true,"showCoordinate":true},
+              "knowledgeTags": ["瓜豆原理","旋转变换性质"],
+              "animation": {"duration":5,"loop":true}
+            }
+
+            规则：
+            1. 主动点（题中「点P从A出发…」的 P）放 driverPoints，track 描述轨迹
+               （type 只能是 segment / ray / line / circle / function），param 是滑杆变量，range 是取值区间。
+               track.type == "function" 时必须带 expr（只含 x、数字、+ - * / ^ ( )、sin/cos/tan/sqrt/log/exp/abs），
+               如 {"type":"function","expr":"x^2"}；circle 的 range 建议 [0,360]，param 语义为角度。
+            2. 从动点（由主动点+约束得到的点）放 drivenPoints，transform 描述几何变换（扁平字段，非嵌套）：
+               - 旋转：{"transform":"rotate","center":"E","angle":60,"from":"P"}
+               - 翻折：{"transform":"reflection","line":["A","B"],"from":"P"}
+               - 平移：{"transform":"translation","vector":[dx,dy],"from":"P"}
+               - 中点：{"transform":"midpoint","p1":"A","p2":"B"}
+               - 平行四边形第四点：{"transform":"parallelogram","p1":"A","p2":"B","p3":"C"}
+               - 等边三角形第三点：{"transform":"equilateral","from":"P","center":"E","side":"left"}
+               - 等腰直角三角形直角顶点：{"transform":"rightTriangle","line":["D","C"],"side":"right"}
+                 （以 line 两端点 D、C 为斜边，输出直角顶点 E，∠E=90°、两腰相等。side 决定 E 在斜边哪一侧：
+                 side="right" = 「从 D 指向 C」的右手侧（顺时针 90°），side="left" = 逆时针 90°。题目「向右侧作」→ side="right"，
+                 「向左侧作」→ side="left"，按题目左右字面直接映射，禁止自己换算 angle 符号。）
+                 禁止用 scale+rotate（scale=0.7071 + angle=±45）凑等腰 Rt——那个 angle 符号极易把左右侧搞反，统一用 rightTriangle + side 表达。
+               - 缩放（位似）：{"transform":"scale","center":"O","scale":2,"from":"P"}
+                 center 必须是固定点（位似中心），scale 是缩放因子 k（可为负表示反位似），from 缺省为第一个主动点。
+               - 缩放+旋转（阿氏圆母子相似/旋转相似手拉手）：{"transform":"scale+rotate","center":"O","scale":2,"angle":60,"from":"P"}
+                 先缩放后绕同一 center 旋转；center 必须是固定点，禁止填主动点。
+               - 两线交点：{"transform":"intersection","line1":["A","B"],"line2":["C","D"]}
+                 line1/line2 各为两点数组，表示过这两点的直线，求两直线交点（非线段求交，直线延伸求交）。
+               - 中心对称：{"transform":"reflection","center":"O","from":"P"}
+                 关于点 O 中心对称（不写 line 字段）；禁止用 centralSymmetry / pointSymmetry 等词，统一写 reflection。
+            3. 求解目标（如求 CF 最小值）放 segTarget，extremum 填 "min"（最小值）或 "max"（最大值）。
+               仅当题目是「求某线段长度的最值」时使用 segTarget。若题目是「求动点运动轨迹的路径长」（如「M 的路径长为 √3/3」），禁止使用 segTarget
+               ——segTarget 语义是「线段最值」，表达不了轨迹长度，强行用会自造 M0/M1 这类虚拟端点导致渲染错误。这类题应：
+               ① 用 trace 追踪该动点（如 "trace":["M"]）让前端画出轨迹；② 答案数值填进 meta.answer（十进制，如 0.577）。
+            4. 主图形放 shapes，按 type 分派：
+               - polygon / triangle / quad：多边形，points + fill（动态图形 fill:true 淡黄填充）
+               - segment：线段，points:[P1,P2]（dash 可选虚线）
+               - line：无限直线，points:[P1,P2]
+               - ray：射线（带箭头，向经过点方向延伸），points:[起点,经过点]
+               - circle：圆，center + radius
+               - function：函数图像，expr + xmin/xmax
+               涉及动点的图形顶点直接写动点名；动态变化的图形 fill:true。
+               必须完整输出题中所有线段/边/射线/辅助线，禁止遗漏；射线一律用 ray 类型。
+            5. 知识点标签放 knowledgeTags，从预置词典召回，禁止自造。
+            6. uiConfig 按题型设置：静态证明题关闭 showSlider/showLocateMin/showTrace。
+            7. 几何关系必须严格还原题干：角度、边长、平行、旋转方向严格遵守，禁止篡改题目条件。
+            8. 点引用必须严格一致：所有字段（from/center/p1/p2/line/points/start/through/segTarget.points 等）里的点名，
+               必须与 fixedPoints/driverPoints/drivenPoints 中定义的 name 完全一致（大写字母）。
+               禁止自造不存在的虚拟点名（如 M_start、M_end、P_begin 之类）；
+               轨迹端点 start/through 必须引用题中真实定点（如 "start":"A","through":"B"）。
+            9. 所有坐标和数值必须是已算好的十进制数字（如 6.196、1.732），
+               严禁任何表达式：Math.sqrt、√、π、分数、根号一律禁止；
+               √3 写 1.732，√2 写 1.414，π 写 3.14159，1/2 写 0.5。
+            10. 只输出 JSON 本身，不要输出 ```json 代码块、不要任何解释文字。
+
+            请解析这道题，输出 JSON：""";
     /** Doubao API Key 兜底（环境变量 DOUBAO_API_KEY 注入，勿硬编码） */
     @Value("${eduai.ai.doubao-api-key:}")
     private String doubaoFallbackKey;
@@ -333,13 +427,16 @@ public class AIChatService {
         log.info("Doubao 实际使用 Key: {}***", apiKey.substring(0, Math.min(8, apiKey.length())));
 
         // URL 优先从 ai_models 解析，兜底硬编码
+        // 端点跟随 body 里的模型名解析，不写死 exam_analysis；查不到时兜底豆包默认端点
         String fullUrl = DOUBAO_API_URL;
-        try {
-            String resolvedUrl = config.resolveModel("exam_analysis").get("apiUrl");
-            if (resolvedUrl != null && !resolvedUrl.isBlank()) {
+        Object modelObj = body.get("model");
+        if (modelObj != null) {
+            String resolvedUrl = config.resolveApiUrl(modelObj.toString());
+            if (resolvedUrl != null && !resolvedUrl.isBlank()
+                    && !resolvedUrl.equals(config.getEffectiveApiUrl())) {
                 fullUrl = resolvedUrl;
             }
-        } catch (Exception ignored) {}
+        }
 
         OkHttpClient client = doubaoHttpClient;
 
@@ -388,13 +485,16 @@ public class AIChatService {
         }
         final String resolvedKey = apiKey;
 
+        // 端点跟随 body 里的模型名解析，不写死 exam_analysis；查不到时兜底豆包默认端点
         String fullUrl = DOUBAO_API_URL;
-        try {
-            String resolvedUrl = config.resolveModel("exam_analysis").get("apiUrl");
-            if (resolvedUrl != null && !resolvedUrl.isBlank()) {
+        Object modelObj = body.get("model");
+        if (modelObj != null) {
+            String resolvedUrl = config.resolveApiUrl(modelObj.toString());
+            if (resolvedUrl != null && !resolvedUrl.isBlank()
+                    && !resolvedUrl.equals(config.getEffectiveApiUrl())) {
                 fullUrl = resolvedUrl;
             }
-        } catch (Exception ignored) {}
+        }
 
         CompletableFuture<String> future = new CompletableFuture<>();
         try {
@@ -446,7 +546,16 @@ public class AIChatService {
             apiKey = loadDoubaoKey();
         }
         final String resolvedKey = apiKey;
+        // 端点跟随 body 里的模型名解析，不写死；查不到时兜底豆包默认端点
         String fullUrl = DOUBAO_API_URL;
+        Object modelObj = body.get("model");
+        if (modelObj != null) {
+            String resolvedUrl = config.resolveApiUrl(modelObj.toString());
+            if (resolvedUrl != null && !resolvedUrl.isBlank()
+                    && !resolvedUrl.equals(config.getEffectiveApiUrl())) {
+                fullUrl = resolvedUrl;
+            }
+        }
         SseEmitter emitter = new SseEmitter(1_200_000L); // 20 分钟（试卷分析 5-10 分钟，Doubao 较慢）
 
         try {
@@ -904,6 +1013,297 @@ public class AIChatService {
                 resolved.get("model"), resolved.get("apiUrl"),
                 resolved.get("apiKey") != null ? resolved.get("apiKey").substring(0, Math.min(8, resolved.get("apiKey").length())) + "***" : "NULL");
         return executeChat(request);
+    }
+
+    /**
+     * AI 动图（动点题）分析 — 识别题目图片，提取几何关系与动点轨迹，输出几何场景 JSON 文本。
+     * <p>
+     * 独立 {@code animation} 模块，模型**跟随管理员端配置**（ai_config.animation → ai_models），不写死豆包：
+     * 命中豆包视觉走 {@code responses} 格式，命中 DeepSeek/OpenAI 兼容模型走 {@code chat/completions} 格式。
+     * 非流式同步返回完整 JSON 文本，由前端 JSON.parse 后渲染。
+     */
+    public CompletableFuture<String> analyzeAnimation(ChatRequest request) {
+        if (request.getSystemPrompt() == null || request.getSystemPrompt().isBlank()) {
+            request.setSystemPrompt(routeTemplate(request));
+        }
+        // 模型 + 端点 + Key 全部来自管理员端配置（animation 模块），不受前端传参影响
+        Map<String, String> resolved = config.resolveModel("animation");
+        request.setModel(resolved.get("model"));
+        request.setApiUrl(resolved.get("apiUrl"));
+        request.setApiKey(resolved.get("apiKey"));
+        log.info("📝 analyzeAnimation 路由: resolveModel(animation) → model={}, url={}, keyPrefix={}",
+                resolved.get("model"), resolved.get("apiUrl"),
+                resolved.get("apiKey") != null ? resolved.get("apiKey").substring(0, Math.min(8, resolved.get("apiKey").length())) + "***" : "NULL");
+
+        // 按模型类型分派：豆包视觉走 responses 格式，其余走 DeepSeek/OpenAI chat/completions 格式
+        if (isDoubao(resolved.get("model"))) {
+            Map<String, Object> body = buildDoubaoBody(request, false);
+            return callDoubaoApiAsync(body, resolved.get("apiKey"))
+                    .thenApply(this::validateAnimationJson);
+        }
+
+        String effectiveModel = getEffectiveModel(resolved.get("model"));
+        String effectiveUrl = config.resolveApiUrl(effectiveModel);
+        String effectiveKey = config.resolveApiKey(effectiveModel);
+        List<Map<String, Object>> messages = trimMessages(buildMessages(request));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", effectiveModel);
+        body.put("messages", messages);
+        body.put("temperature", 0.0);
+        body.put("stream", false);
+        log.info("📝 analyzeAnimation(DeepSeek) 请求: model={}, url={}", effectiveModel, effectiveUrl);
+        return callDeepSeekApiAsync(body, "/chat/completions", effectiveUrl, effectiveKey)
+                .thenApply(this::validateAnimationJson);
+    }
+
+    /**
+     * 知识点模板路由（§4 核心机制）：扫描题目文字是否命中已启用的知识点模板（knowledge_template 表），
+     * 按 weight 降序取最高优先级命中项，把其 template_prompt 拼接到基础提示词前约束几何构造 Agent。
+     * 未命中或表未就绪时返回基础提示词。
+     */
+    private String routeTemplate(ChatRequest request) {
+        String base = ANIMATION_PROMPT;
+        String userText = extractUserText(request);
+        try {
+            @SuppressWarnings("unchecked")
+            List<Object[]> rows = entityManager.createNativeQuery(
+                    "SELECT tag, template_prompt FROM knowledge_template WHERE enabled = 1 ORDER BY weight DESC")
+                    .getResultList();
+            for (Object[] row : rows) {
+                String tag = row[0] == null ? "" : row[0].toString();
+                String tpl = row[1] == null ? "" : row[1].toString();
+                if (!tag.isBlank() && userText.contains(tag) && !tpl.isBlank()) {
+                    log.info("📚 动图模板路由命中: tag={}", tag);
+                    return tpl + "\n\n" + base;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("knowledge_template 表未就绪，跳过模板路由: {}", e.getMessage());
+        }
+        return base;
+    }
+
+    /** 拼接题目文字（含 user 消息内容 + 图片 URL），用于模板标签匹配。 */
+    private String extractUserText(ChatRequest request) {
+        StringBuilder sb = new StringBuilder();
+        if (request.getMessages() != null) {
+            for (ChatRequest.Message m : request.getMessages()) {
+                if (m != null && m.getContent() != null) {
+                    sb.append(m.getContent()).append('\n');
+                }
+            }
+        }
+        if (request.getImageUrl() != null) {
+            sb.append(request.getImageUrl()).append('\n');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 校验动图分析返回的 JSON 文本：剥离可能的 ```json 代码块后校验合法性。
+     * 豆包偶发输出含 JS 表达式的伪 JSON（如 coord:[9, 1+3*Math.sqrt(3)]），
+     * 先直接解析，失败则把算术表达式求值替换为数字后重试一次，仍失败才抛业务错误。
+     */
+    private String validateAnimationJson(String content) {
+        String json = content == null ? "" : content.trim();
+        if (json.startsWith("```")) {
+            int start = json.indexOf('\n');
+            if (start >= 0) {
+                int end = json.lastIndexOf("```");
+                json = (end > start) ? json.substring(start + 1, end) : json.substring(start + 1);
+            }
+        }
+        json = json.trim();
+        try {
+            objectMapper.readTree(json);
+            return content;
+        } catch (Exception e) {
+            String cleaned = sanitizeJsonExpr(json);
+            try {
+                objectMapper.readTree(cleaned);
+                log.info("动图分析：已将含表达式的坐标 JSON 清洗为合法 JSON");
+                return cleaned;
+            } catch (Exception e2) {
+                log.warn("动图分析返回非 JSON（清洗后仍失败），解析错误: {}；原始 JSON 全文: {}",
+                        e2.getMessage(), json);
+                throw new BusinessException(500, "AI 未能解析出几何关系，请换一张更清晰的题目图");
+            }
+        }
+    }
+
+    /**
+     * 把 JSON 文本数值槽位里的算术表达式（1+3*Math.sqrt(3)、Math.PI、2*pi/3 等）
+     * 求值替换为数字，使豆包偶发的伪 JSON 变为合法 JSON。字符串与结构原样保留。
+     */
+    private String sanitizeJsonExpr(String json) {
+        StringBuilder out = new StringBuilder(json.length());
+        int n = json.length();
+        int i = 0;
+        while (i < n) {
+            char c = json.charAt(i);
+            if (c == '"') { // 字符串：跳到闭合引号（跳过转义）
+                int j = i + 1;
+                while (j < n) {
+                    char cc = json.charAt(j);
+                    if (cc == '\\') { j += 2; continue; }
+                    if (cc == '"') { j++; break; }
+                    j++;
+                }
+                out.append(json, i, Math.min(j, n));
+                i = Math.min(j, n);
+            } else if (c == '[' || c == ']' || c == '{' || c == '}' || c == ':' || c == ',' || Character.isWhitespace(c)) {
+                out.append(c);
+                i++;
+            } else {
+                int j = i;
+                while (j < n) {
+                    char cc = json.charAt(j);
+                    if (cc == ',' || cc == ']' || cc == '}' || Character.isWhitespace(cc)) break;
+                    j++;
+                }
+                String token = json.substring(i, j).trim();
+                if (isPlainNumber(token) || "true".equals(token) || "false".equals(token) || "null".equals(token)) {
+                    out.append(token);
+                } else {
+                    Double v = evalExpr(token);
+                    out.append(v != null ? formatDouble(v) : token);
+                }
+                i = j;
+            }
+        }
+        return out.toString();
+    }
+
+    /** 是否纯数字（含负号/小数点/科学计数法） */
+    private boolean isPlainNumber(String s) {
+        if (s == null || s.isEmpty()) return false;
+        try { Double.parseDouble(s); return true; } catch (NumberFormatException e) { return false; }
+    }
+
+    /** 求值算术表达式（归一化常见符号后交给 ExprParser），失败返回 null */
+    private Double evalExpr(String s) {
+        if (s == null || s.isEmpty()) return null;
+        try {
+            String normalized = s
+                    .replace("Math.", "").replace("math.", "")
+                    .replace("·", "*").replace("×", "*")
+                    .replace("÷", "/").replace("°", "").replace("º", "");
+            return new ExprParser(normalized).parse();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 数字格式化：整数不带小数点，小数保留 6 位去尾零 */
+    private String formatDouble(double v) {
+        if (Double.isNaN(v) || Double.isInfinite(v)) return "0";
+        if (v == Math.floor(v) && Math.abs(v) < 1e15) {
+            return String.valueOf((long) v);
+        }
+        return java.math.BigDecimal.valueOf(v)
+                .setScale(6, java.math.RoundingMode.HALF_UP)
+                .stripTrailingZeros().toPlainString();
+    }
+
+    /** 轻量递归下降算术表达式求值器（支持 + - * / ^ 括号、sqrt/sin/cos/tan/abs/log/exp、pi/π/e） */
+    private static class ExprParser {
+        private final String s;
+        private int i;
+        ExprParser(String s) { this.s = s; }
+
+        double parse() {
+            double v = parseAddSub();
+            skipWs();
+            if (i < s.length()) throw new IllegalArgumentException("多余字符@" + i);
+            return v;
+        }
+        double parseAddSub() {
+            double v = parseMulDiv();
+            while (true) {
+                skipWs();
+                if (i < s.length() && s.charAt(i) == '+') { i++; v += parseMulDiv(); }
+                else if (i < s.length() && s.charAt(i) == '-') { i++; v -= parseMulDiv(); }
+                else break;
+            }
+            return v;
+        }
+        double parseMulDiv() {
+            double v = parsePow();
+            while (true) {
+                skipWs();
+                if (i < s.length() && s.charAt(i) == '*') { i++; v *= parsePow(); }
+                else if (i < s.length() && s.charAt(i) == '/') { i++; v /= parsePow(); }
+                else break;
+            }
+            return v;
+        }
+        double parsePow() {
+            double base = parseUnary();
+            skipWs();
+            if (i < s.length() && s.charAt(i) == '^') { i++; return Math.pow(base, parsePow()); }
+            return base;
+        }
+        double parseUnary() {
+            skipWs();
+            if (i < s.length() && s.charAt(i) == '-') { i++; return -parseUnary(); }
+            if (i < s.length() && s.charAt(i) == '+') { i++; return parseUnary(); }
+            if (i < s.length() && s.charAt(i) == '√') { i++; return Math.sqrt(parseUnary()); }
+            return parsePrimary();
+        }
+        double parsePrimary() {
+            skipWs();
+            if (i >= s.length()) throw new IllegalArgumentException("意外结尾");
+            char c = s.charAt(i);
+            if (c == '(') {
+                i++; double v = parseAddSub(); skipWs();
+                if (i < s.length() && s.charAt(i) == ')') i++;
+                return v;
+            }
+            if (Character.isDigit(c) || c == '.') return parseNumber();
+            if (Character.isLetter(c)) {
+                String name = parseName();
+                skipWs();
+                if (i < s.length() && s.charAt(i) == '(') {
+                    i++; double arg = parseAddSub(); skipWs();
+                    if (i < s.length() && s.charAt(i) == ')') i++;
+                    return applyFunc(name, arg);
+                }
+                return applyConst(name);
+            }
+            throw new IllegalArgumentException("无法解析字符@" + i + ":" + c);
+        }
+        double parseNumber() {
+            int start = i;
+            while (i < s.length() && (Character.isDigit(s.charAt(i)) || s.charAt(i) == '.')) i++;
+            return Double.parseDouble(s.substring(start, i));
+        }
+        String parseName() {
+            int start = i;
+            while (i < s.length() && Character.isLetter(s.charAt(i))) i++;
+            return s.substring(start, i);
+        }
+        double applyFunc(String name, double arg) {
+            return switch (name.toLowerCase()) {
+                case "sqrt" -> Math.sqrt(arg);
+                case "sin" -> Math.sin(arg);
+                case "cos" -> Math.cos(arg);
+                case "tan" -> Math.tan(arg);
+                case "abs" -> Math.abs(arg);
+                case "log", "ln" -> Math.log(arg);
+                case "exp" -> Math.exp(arg);
+                default -> throw new IllegalArgumentException("未知函数:" + name);
+            };
+        }
+        double applyConst(String name) {
+            return switch (name.toLowerCase()) {
+                case "pi", "π" -> Math.PI;
+                case "e" -> Math.E;
+                default -> throw new IllegalArgumentException("未知常量:" + name);
+            };
+        }
+        void skipWs() {
+            while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        }
     }
 
     // ==================== 内部方法 ====================
