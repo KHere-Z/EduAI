@@ -602,10 +602,10 @@ public class ExamPaperServiceImpl implements ExamPaperService {
     // ==================== 试卷分析报告 HTML 构建 ====================
 
     private String buildPdfHtml(ExamPaper paper) {
-        String studentName = getStudentName(paper.getStudentId());
+        String studentName = escapeHtml(getStudentName(paper.getStudentId()));
         String now = LocalDate.now().toString();
-        String subjectName = SUBJECT_MAP.getOrDefault(paper.getSubject(), paper.getSubject());
-        String examType = paper.getExamType() != null ? paper.getExamType() : "";
+        String subjectName = escapeHtml(SUBJECT_MAP.getOrDefault(paper.getSubject(), paper.getSubject()));
+        String examType = escapeHtml(paper.getExamType() != null ? paper.getExamType() : "");
         String scoreStr = paper.getScore() != null ? paper.getScore() + "分" : "";
 
         String raw = paper.getPaperAnalysis();
@@ -667,7 +667,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
 
     private String clean(String text) {
         if (text == null) return "";
-        return stripKatex(text).replaceAll("\\[/?[a-zA-Z]+\\]", "");
+        return escapeHtml(stripKatex(text).replaceAll("\\[/?[a-zA-Z]+\\]", ""));
     }
 
     private String formatWrongQuestions(String text) {
@@ -693,13 +693,13 @@ public class ExamPaperServiceImpl implements ExamPaperService {
             String[] parts = line.split("\\|");
             String content;
             if (parts.length >= 3) {
-                String module = parts[0].trim();
-                String current = parts[1].trim();
-                String target = parts[2].trim();
-                String strategy = parts.length > 3 ? "（" + parts[3].trim() + "）" : "";
+                String module = escapeHtml(parts[0].trim());
+                String current = escapeHtml(parts[1].trim());
+                String target = escapeHtml(parts[2].trim());
+                String strategy = parts.length > 3 ? "（" + escapeHtml(parts[3].trim()) + "）" : "";
                 content = "<b>" + module + "</b>：" + current + " <span class=\"flow-arrow\">→</span> " + target + "分 " + strategy;
             } else {
-                content = line;
+                content = escapeHtml(line);
             }
             boolean last = (i == lines.length - 1);
             sb.append("<div class=\"flow-item\">")
@@ -729,7 +729,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
                 }
             }
             int n = dims.size();
-            if (n < 3) return "<p>" + json + "</p>";
+            if (n < 3) return "<p>" + escapeHtml(json) + "</p>";
 
             int size = 400, cx = size / 2, cy = size / 2, r = 130;
             BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_RGB);
