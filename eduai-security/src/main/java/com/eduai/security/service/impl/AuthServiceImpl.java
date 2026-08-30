@@ -19,6 +19,7 @@ import com.eduai.security.repository.TeacherRepository;
 import com.eduai.security.repository.UserRepository;
 import com.eduai.security.repository.UserWechatRepository;
 import com.eduai.security.service.AuthService;
+import com.eduai.security.service.PointService;
 import com.eduai.security.service.SmsService;
 import com.eduai.security.service.WechatBindingService;
 import com.eduai.security.vo.LoginVO;
@@ -63,6 +64,7 @@ public class AuthServiceImpl implements AuthService {
     private final WechatBindingService wechatBindingService;
     private final JdbcTemplate jdbcTemplate;
     private final CosStorageService cosStorageService;
+    private final PointService pointService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -145,6 +147,9 @@ public class AuthServiceImpl implements AuthService {
         }
 
         userRepository.save(user);
+
+        // 新用户注册奖励 25 智学点
+        pointService.charge(user.getId(), 25, "gift", "新用户注册奖励 25 点");
 
         if (dto.getRoleType() == 3 && dto.getSubjectIds() != null && !dto.getSubjectIds().isBlank()) {
             Teacher teacher = Teacher.builder()
@@ -535,6 +540,9 @@ public class AuthServiceImpl implements AuthService {
         }
 
         user = userRepository.save(user);
+
+        // 新用户注册奖励 25 智学点
+        pointService.charge(user.getId(), 25, "gift", "新用户注册奖励 25 点");
 
         // 教师自注册：自动创建 teachers 记录
         if (roleEnum == RoleEnum.TEACHER) {

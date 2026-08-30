@@ -32,9 +32,10 @@ public class MockPaymentServiceImpl implements PaymentService {
 
     /** 价格映射（分） */
     private static final Map<String, Integer> PRICES = Map.of(
-            "month",   3000,   // 30元
-            "quarter", 7900,   // 79元
-            "year",    19900   // 199元
+            "month",    2900,   // 29元
+            "quarter",  7900,   // 79元
+            "halfyear", 13900,  // 139元
+            "year",     19900   // 199元
     );
 
     @Override
@@ -50,10 +51,10 @@ public class MockPaymentServiceImpl implements PaymentService {
             return Result.error("无效的会员方案: " + plan);
         }
 
-        // 价格计算：会员价 + 点数金额（1元=100点=100分）
+        // 价格计算：会员价 + 点数金额（1元=10点，1点=10分）
         int totalCents = 0;
         if (plan != null) totalCents += PRICES.get(plan);
-        if (buyPoints != null) totalCents += buyPoints;  // 1点=1分
+        if (buyPoints != null) totalCents += buyPoints * 10;  // 1点=10分
 
         String orderId = UUID.randomUUID().toString().substring(0, 8);
         ORDERS.put(orderId, new PaymentOrder(orderId, userId, plan,

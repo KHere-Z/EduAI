@@ -2,9 +2,11 @@ package com.eduai.ai.controller;
 
 import cn.dev33.satoken.stp.StpUtil;
 import cn.dev33.satoken.stp.StpUtil;
+import com.eduai.ai.dto.AnimationSaveRequest;
 import com.eduai.ai.dto.ChatRequest;
 import com.eduai.ai.dto.UploadResponse;
 import com.eduai.ai.service.AIChatService;
+import com.eduai.ai.service.AiAnimationHistoryService;
 import com.eduai.common.Result;
 import com.eduai.common.annotation.RateLimit;
 import com.eduai.common.storage.CosStorageService;
@@ -15,6 +17,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -48,6 +53,7 @@ public class AIController {
     private final AIChatService aiChatService;
     private final PointService pointService;
     private final CosStorageService cosStorageService;
+    private final AiAnimationHistoryService aiAnimationHistoryService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -141,6 +147,110 @@ public class AIController {
                 request.getMessages() != null ? request.getMessages().size() : 0,
                 request.getImageUrl());
         return aiChatService.analyzeExam(request).thenApply(Result::ok);
+    }
+
+    /**
+     * AI 动图（动点题）分析 — 上传题目图片，AI 提取几何关系与动点轨迹，返回几何场景 JSON。
+     * <p>
+     * POST /api/v1/ai/animation（非流式，data 为豆包原始 JSON 文本，前端 JSON.parse 后渲染）
+     */
+    @PostMapping("/animation")
+    @RateLimit(limit = 10, windowSec = 60, message = "AI 调用过于频繁，请 1 分钟后再试")
+    public CompletableFuture<Result<String>> analyzeAnimation(@RequestBody ChatRequest request) {
+        pointService.consume(StpUtil.getLoginIdAsLong(),
+                PointServiceImpl.COST_AI_ANIMATION, "AI动图");
+        log.info("POST /api/v1/ai/animation imageUrl={}",
+                request.getImageUrl());
+        return aiChatService.analyzeAnimation(request).thenApply(Result::ok);
+    }
+
+    // ==================== 动图历史持久化 ====================
+
+    /**
+     * 保存 AI 动图历史 — 前端生成交互动图后保存历史卡片。
+     * <p>
+     * POST /api/v1/ai/animation/save
+     */
+    @PostMapping("/animation/save")
+    public Result<Map<String, Object>> saveAnimation(@RequestBody AnimationSaveRequest req) {
+        StpUtil.checkLogin();
+        String coverUrl = persistCoverImage(req.getCoverImage());
+        Map<String, Object> record = aiAnimationHistoryService.save(
+                req.getTitle(), req.getGrade(), req.getSubject(),
+                req.getKnowledgeTags(), req.getSchema(), coverUrl);
+        return Result.ok(record);
+    }
+
+    /**
+     * AI 动图历史列表（分页，不含 schema，体积小），可按 subject 过滤。
+     * 返回 { list, total } 供前端 el-pagination 使用。
+     * <p>
+     * GET /api/v1/ai/animation/history?page=1&pageSize=9&subject=数学
+     */
+    @GetMapping("/animation/history")
+    public Result<Map<String, Object>> animationHistory(
+            @RequestParam(value = "page", defaultValue = "1") int page,
+            @RequestParam(value = "pageSize", defaultValue = "9") int pageSize,
+            @RequestParam(value = "subject", required = false) String subject) {
+        StpUtil.checkLogin();
+        return Result.ok(aiAnimationHistoryService.history(page, pageSize, subject));
+    }
+
+    /**
+     * AI 动图历史详情（含 schema，用于加载旧动图）。
+     * <p>
+     * GET /api/v1/ai/animation/history/{id}
+     */
+    @GetMapping("/animation/history/{id}")
+    public Result<Map<String, Object>> animationHistoryDetail(@PathVariable long id) {
+        StpUtil.checkLogin();
+        Map<String, Object> record = aiAnimationHistoryService.detail(id);
+        if (record == null) {
+            return Result.fail("记录不存在或无权访问");
+        }
+        return Result.ok(record);
+    }
+
+    /**
+     * 删除 AI 动图历史。
+     * <p>
+     * DELETE /api/v1/ai/animation/history/{id}
+     */
+    @DeleteMapping("/animation/history/{id}")
+    public Result<Boolean> deleteAnimationHistory(@PathVariable long id) {
+        StpUtil.checkLogin();
+        return Result.ok(aiAnimationHistoryService.delete(id));
+    }
+
+    /**
+     * 封面图（base64 data URL）落盘成图片文件，返回可访问 URL。
+     * <p>
+     * 落盘失败返回 null（前端已用 coverImage 兜底，不中断保存主流程）。
+     */
+    private String persistCoverImage(String dataUrl) {
+        if (dataUrl == null || dataUrl.isBlank()) {
+            return null;
+        }
+        try {
+            String ext = "png";
+            String base64 = dataUrl;
+            if (dataUrl.startsWith("data:")) {
+                int comma = dataUrl.indexOf(',');
+                if (comma > 0) {
+                    String header = dataUrl.substring(0, comma);
+                    base64 = dataUrl.substring(comma + 1);
+                    if (header.contains("image/")) {
+                        ext = header.substring(header.indexOf("image/") + 6).replace(";base64", "");
+                    }
+                }
+            }
+            byte[] bytes = Base64.getDecoder().decode(base64);
+            Result<UploadResponse> res = saveFile(bytes, "cover." + ext, ext);
+            return res != null && res.getData() != null ? res.getData().getUrl() : null;
+        } catch (Exception e) {
+            log.warn("封面图落盘失败，忽略: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

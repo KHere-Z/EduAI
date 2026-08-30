@@ -14,4 +14,7 @@ public interface ResourceFileRepository extends JpaRepository<ResourceFile, Long
 
     /** 按小节查询资源文件（创建时间倒序） */
     List<ResourceFile> findBySectionIdOrderByCreatedAtDesc(Long sectionId);
+
+    /** 按审核状态查询（创建时间倒序，用于待审核列表） */
+    List<ResourceFile> findByStatusOrderByCreatedAtDesc(String status);
 }

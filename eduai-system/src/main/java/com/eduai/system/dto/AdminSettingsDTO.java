@@ -32,4 +32,7 @@ public class AdminSettingsDTO {
 
     /** 试卷分析模型（如 "doubao-seed-2-1-pro-260628"） */
     private String examAnalysisModel;
+
+    /** AI 动图模型（默认豆包视觉 "doubao-seed-2-1-pro-260628"） */
+    private String animationModel;
 }

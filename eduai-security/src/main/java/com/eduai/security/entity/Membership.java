@@ -27,7 +27,7 @@ public class Membership {
     @Column(name = "user_id", unique = true, nullable = false)
     private Long userId;
 
-    /** 方案: month/quarter/year */
+    /** 方案: month/quarter/halfyear/year */
     @Column(length = 20)
     private String plan;
 

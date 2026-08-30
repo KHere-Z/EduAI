@@ -740,6 +740,9 @@ public class AdminServiceImpl implements AdminService {
         if (dto.getExamAnalysisModel() != null) {
             upsertModule("exam_analysis", dto.getExamAnalysisModel());
         }
+        if (dto.getAnimationModel() != null) {
+            upsertModule("animation", dto.getAnimationModel());
+        }
         aiConfigRepository.flush();
         deepSeekConfig.refresh();
         return getSettings();

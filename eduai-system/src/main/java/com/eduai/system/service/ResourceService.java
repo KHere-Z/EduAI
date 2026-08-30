@@ -10,6 +10,7 @@ import com.eduai.system.entity.ResourceSection;
 import com.eduai.system.entity.ResourceTextbook;
 import com.eduai.system.vo.ArchiveEntryVO;
 import com.eduai.system.vo.ResourceFileVO;
+import com.eduai.system.vo.ResourceReviewVO;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
@@ -74,4 +75,12 @@ public interface ResourceService {
 
     /** 预览文件流（截断+水印，与原始文件隔离） */
     PreviewFile previewResourceFile(Long id);
+
+    // ==================== 资源审核 ====================
+
+    /** 待审核资源列表（管理员） */
+    List<ResourceReviewVO> listPendingResources();
+
+    /** 审核资源：通过（可改价）/ 驳回（必填理由） */
+    void reviewResource(Long id, boolean approved, Integer price, String reason);
 }

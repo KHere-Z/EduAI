@@ -7,6 +7,7 @@ import com.eduai.security.entity.User;
 import com.eduai.security.entity.UserRelation;
 import com.eduai.security.repository.UserRelationRepository;
 import com.eduai.security.repository.UserRepository;
+import com.eduai.security.service.MessageService;
 import com.eduai.security.service.PointService;
 import com.eduai.system.dto.DownloadFile;
 import com.eduai.system.dto.PreviewFile;
@@ -27,6 +28,7 @@ import com.eduai.system.service.ResourcePreviewService;
 import com.eduai.system.service.ResourceService;
 import com.eduai.system.vo.ArchiveEntryVO;
 import com.eduai.system.vo.ResourceFileVO;
+import com.eduai.system.vo.ResourceReviewVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,6 +45,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -68,6 +71,7 @@ public class ResourceServiceImpl implements ResourceService {
     private final UserRelationRepository relationRepository;
     private final ResourceDownloadRepository resourceDownloadRepository;
     private final PointService pointService;
+    private final MessageService messageService;
     private final ResourcePreviewService previewService;
 
     @Value("${eduai.upload.dir:uploads}")
@@ -82,6 +86,17 @@ public class ResourceServiceImpl implements ResourceService {
                 .orElseThrow(() -> new BusinessException(401, "用户不存在"));
         if (user.getRoleType() != 3 && user.getRoleType() != 1) {
             throw new BusinessException(403, "仅教师或管理员可访问");
+        }
+        return user;
+    }
+
+    /** 校验当前用户为管理员（roleType=1） */
+    private User checkAdmin() {
+        Long userId = StpUtil.getLoginIdAsLong();
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(401, "用户不存在"));
+        if (user.getRoleType() == null || user.getRoleType() != 1) {
+            throw new BusinessException(403, "仅管理员可访问");
         }
         return user;
     }
@@ -386,6 +401,9 @@ public class ResourceServiceImpl implements ResourceService {
         return fileRepository.findBySectionIdOrderByCreatedAtDesc(sectionId)
                 .stream()
                 .filter(f -> canReadResource(f, ctx))
+                // 仅展示已通过资源 + 本人上传的（含待审核/驳回，用于展示审核进度）
+                .filter(f -> "approved".equals(f.getStatus())
+                        || (ctx.userId != null && ctx.userId.equals(f.getUploaderId())))
                 .map(this::toVO)
                 .collect(Collectors.toList());
     }
@@ -405,6 +423,10 @@ public class ResourceServiceImpl implements ResourceService {
 
         boolean isShared = shared == null || shared;
 
+        // 按角色定初始审核状态：管理员直通 approved，老师待审核 pending
+        boolean isAdmin = uploader.getRoleType() != null && uploader.getRoleType() == 1;
+        String status = isAdmin ? "approved" : "pending";
+
         List<String> previewPathList = parsePreviewPaths(previewPaths);
 
         String author = uploader.getNickname() != null ? uploader.getNickname()
@@ -418,7 +440,7 @@ public class ResourceServiceImpl implements ResourceService {
             }
             String previewPath = i < previewPathList.size() ? previewPathList.get(i) : null;
             ResourceFile saved = saveFile(sectionId, subject, tag, year, price, isShared, author,
-                    uploader.getId(), previewPath, file);
+                    uploader.getId(), status, previewPath, file);
             result.add(toVO(saved));
         }
 
@@ -522,12 +544,63 @@ public class ResourceServiceImpl implements ResourceService {
         return previewService.getPreviewFile(resource);
     }
 
+    // ==================== 资源审核 ====================
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<ResourceReviewVO> listPendingResources() {
+        checkAdmin();
+        return fileRepository.findByStatusOrderByCreatedAtDesc("pending")
+                .stream()
+                .map(this::toReviewVO)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional
+    public void reviewResource(Long id, boolean approved, Integer price, String reason) {
+        User reviewer = checkAdmin();
+        ResourceFile resource = fileRepository.findById(id)
+                .orElseThrow(() -> new BusinessException(404, "资源不存在"));
+        if (!"pending".equals(resource.getStatus())) {
+            throw new BusinessException(400, "该资源已审核，无需重复操作");
+        }
+
+        resource.setReviewerId(reviewer.getId());
+        resource.setReviewedAt(LocalDateTime.now());
+        if (approved) {
+            resource.setStatus("approved");
+            if (price != null) resource.setPrice(price);
+            resource.setRejectReason(null);
+        } else {
+            if (reason == null || reason.isBlank()) {
+                throw new BusinessException(400, "驳回理由不能为空");
+            }
+            resource.setStatus("rejected");
+            resource.setRejectReason(reason);
+        }
+        fileRepository.save(resource);
+
+        // 无论通过或驳回，均通知上传老师
+        if (resource.getUploaderId() != null) {
+            String fileName = resource.getFileName() == null ? "" : resource.getFileName();
+            if (approved) {
+                messageService.send(resource.getUploaderId(), "RESOURCE_REVIEW",
+                        "资源审核通过", "你上传的《" + fileName + "》已通过审核");
+            } else {
+                messageService.send(resource.getUploaderId(), "RESOURCE_REVIEW",
+                        "资源被驳回", "你上传的《" + fileName + "》被驳回，理由：" + reason);
+            }
+        }
+        log.info("资源审核: id={} approved={} reviewerId={} price={}", id, approved, reviewer.getId(), price);
+    }
+
     // ==================== 内部方法 ====================
 
     /** 落盘并入库单个文件 */
     private ResourceFile saveFile(Long sectionId, String subject, String tag, String year,
                                   Integer price, boolean shared, String author, Long uploaderId,
-                                  String previewPath, MultipartFile file) {
+                                  String status, String previewPath, MultipartFile file) {
         String originalName = file.getOriginalFilename();
         String ext = "";
         if (originalName != null && originalName.contains(".")) {
@@ -563,6 +636,7 @@ public class ResourceServiceImpl implements ResourceService {
                 .fileSize(file.getSize())
                 .author(author)
                 .uploaderId(uploaderId)
+                .status(status)
                 .shared(shared)
                 .previewPath(effectivePreviewPath)
                 .build();
@@ -613,6 +687,34 @@ public class ResourceServiceImpl implements ResourceService {
         }
     }
 
+    /** ResourceFile Entity → 审核列表 VO */
+    private ResourceReviewVO toReviewVO(ResourceFile r) {
+        String uploaderId = null;
+        String uploaderName = r.getAuthor();
+        if (r.getUploaderId() != null) {
+            User u = userRepository.findById(r.getUploaderId()).orElse(null);
+            if (u != null) {
+                uploaderId = u.getUid() != null ? String.format("%08d", u.getUid()) : null;
+                if (uploaderName == null || uploaderName.isBlank()) {
+                    uploaderName = u.getNickname() != null ? u.getNickname()
+                            : (u.getRealName() != null ? u.getRealName() : u.getUsername());
+                }
+            }
+        }
+        return ResourceReviewVO.builder()
+                .id(r.getId())
+                .fileName(r.getFileName())
+                .tag(r.getType())
+                .year(r.getYear())
+                .price(r.getPrice())
+                .shared(r.getShared())
+                .uploaderId(uploaderId)
+                .uploaderName(uploaderName)
+                .subject(r.getSubject())
+                .createdAt(r.getCreatedAt())
+                .build();
+    }
+
     /** ResourceFile Entity → VO */
     private ResourceFileVO toVO(ResourceFile r) {
         return ResourceFileVO.builder()
@@ -631,6 +733,8 @@ public class ResourceServiceImpl implements ResourceService {
                 .uploaderId(r.getUploaderId())
                 .shared(r.getShared())
                 .downloadCount(r.getDownloadCount())
+                .status(r.getStatus())
+                .rejectReason(r.getRejectReason())
                 .createdAt(r.getCreatedAt())
                 .build();
     }

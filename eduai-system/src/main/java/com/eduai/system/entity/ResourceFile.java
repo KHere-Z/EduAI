@@ -39,7 +39,7 @@ public class ResourceFile {
     @Column(length = 10)
     private String year;
 
-    /** 资源点：管理员端统一 200；老师端 100/300/500（后端只存不校验） */
+    /** 资源点（1:10 体系）：管理员端统一 20；老师端 10/30/50（后端只存不校验） */
     @Column(nullable = false)
     private Integer price;
 
@@ -80,6 +80,23 @@ public class ResourceFile {
     @Column(name = "download_count")
     private Integer downloadCount;
 
+    /** 审核状态：pending/approved/rejected */
+    @Column(length = 20, nullable = false)
+    @Builder.Default
+    private String status = "approved";
+
+    /** 驳回理由（仅 rejected 时非空） */
+    @Column(name = "reject_reason", length = 500)
+    private String rejectReason;
+
+    /** 审核管理员 users.id */
+    @Column(name = "reviewer_id")
+    private Long reviewerId;
+
+    /** 审核时间 */
+    @Column(name = "reviewed_at")
+    private LocalDateTime reviewedAt;
+
     /** 创建时间 */
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -92,5 +109,6 @@ public class ResourceFile {
         if (this.fileSize == null) this.fileSize = 0L;
         if (this.downloadCount == null) this.downloadCount = 0;
         if (this.shared == null) this.shared = true;
+        if (this.status == null) this.status = "approved";
     }
 }

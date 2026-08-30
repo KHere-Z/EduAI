@@ -39,5 +39,9 @@ public class ResourceFileVO {
     /** 是否共享：true=所有用户可见；false=仅上传者及其学生可见 */
     private Boolean shared;
     private Integer downloadCount;
+    /** 审核状态：pending/approved/rejected */
+    private String status;
+    /** 驳回理由 */
+    private String rejectReason;
     private LocalDateTime createdAt;
 }

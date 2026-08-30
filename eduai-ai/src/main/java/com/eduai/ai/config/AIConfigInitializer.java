@@ -72,7 +72,8 @@ public class AIConfigInitializer implements CommandLineRunner {
             entityManager.createNativeQuery(
                     "INSERT INTO ai_config (module, model) VALUES " +
                     "('wrong_analysis','deepseek-v4-pro')," +
-                    "('exam_analysis','doubao-seed-2-1-pro-260628')"
+                    "('exam_analysis','doubao-seed-2-1-pro-260628')," +
+                    "('animation','doubao-seed-2-1-pro-260628')"
             ).executeUpdate();
             log.info("✅ ai_config 默认配置已写入（三级模块→模型引用）");
         } catch (Exception e) {
