@@ -402,7 +402,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
                 <!DOCTYPE html><html><head><meta charset="UTF-8"/>
                 <style>
                   @page { size: A4; margin: 2cm 2.5cm; }
-                  body { font-family: "Noto Sans SC","SimSun","PingFang SC","Microsoft YaHei",sans-serif;
+                  body { font-family: "Noto Sans CJK SC","SimSun","PingFang SC","Microsoft YaHei",sans-serif;
                          font-size: 12pt; line-height: 2; color: #333; }
                   .main-title { text-align: center; font-size: 20pt; font-weight: bold; margin-bottom: 8px; }
                   .info-line { text-align: center; font-size: 11pt; color: #666; margin-bottom: 24px; }
@@ -620,7 +620,7 @@ public class ExamPaperServiceImpl implements ExamPaperService {
         <!DOCTYPE html><html><head><meta charset="UTF-8"/>
         <style>
           *{margin:0;padding:0;box-sizing:border-box}
-          body{font-family:"Noto Sans SC","SimSun","PingFang SC","Microsoft YaHei",sans-serif;padding:8px 48px 40px 48px;color:#333;max-width:900px;margin:0 auto;font-size:14px;line-height:1.8}
+          body{font-family:"Noto Sans CJK SC","SimSun","PingFang SC","Microsoft YaHei",sans-serif;padding:8px 48px 40px 48px;color:#333;max-width:900px;margin:0 auto;font-size:14px;line-height:1.8}
           .main-title{text-align:center;font-size:22px;font-weight:bold;color:#4F46E5;margin-bottom:2px;padding-bottom:2px}
           .header{text-align:center;padding:10px 20px;background:linear-gradient(135deg,#6366F1,#8B5CF6);border-radius:12px;color:#fff;margin-bottom:2px}
           .header h1{font-size:16px;margin-bottom:2px}.header .tags span{background:rgba(255,255,255,.2);padding:2px 12px;border-radius:10px;font-size:12px;margin:0 4px}
