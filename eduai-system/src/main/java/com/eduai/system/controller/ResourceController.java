@@ -1,5 +1,6 @@
 package com.eduai.system.controller;
 
+import com.eduai.common.BusinessException;
 import com.eduai.common.Result;
 import com.eduai.system.dto.DownloadFile;
 import com.eduai.system.dto.PreviewFile;
@@ -163,18 +164,24 @@ public class ResourceController {
 
     // ==================== 资源文件 ====================
 
-    /** 资源列表（按小节） */
+    /** 资源列表（按任意层级节点，聚合子级） */
     @GetMapping("/resources")
     public Result<List<ResourceFileVO>> listResources(
-            @RequestParam Long sectionId,
+            @RequestParam(required = false) String nodeType,
+            @RequestParam(required = false) Long nodeId,
+            @RequestParam(required = false) Long sectionId,
             @RequestParam(required = false) String subject) {
-        return Result.ok(resourceService.listResources(sectionId, subject));
+        // 兼容旧客户端：只传 sectionId 时映射为 section 节点
+        String[] node = resolveNode(nodeType, nodeId, sectionId);
+        return Result.ok(resourceService.listResources(node[0], Long.valueOf(node[1]), subject));
     }
 
-    /** 上传资源（多文件） */
+    /** 上传资源（多文件，挂任意层级节点） */
     @PostMapping("/resources/upload")
     public Result<List<ResourceFileVO>> uploadResources(
-            @RequestParam("sectionId") Long sectionId,
+            @RequestParam(required = false) String nodeType,
+            @RequestParam(required = false) Long nodeId,
+            @RequestParam(required = false) Long sectionId,
             @RequestParam(value = "subject", required = false) String subject,
             @RequestParam("tag") String tag,
             @RequestParam(value = "year", required = false) String year,
@@ -186,9 +193,21 @@ public class ResourceController {
         List<MultipartFile> allFiles = new ArrayList<>();
         if (files != null) allFiles.addAll(files);
         if (filesAlt != null) allFiles.addAll(filesAlt);
-        log.info("POST /api/v1/resource/resources/upload sectionId={} tag={} year={} price={} shared={} previewPaths={} files={}",
-                sectionId, tag, year, price, shared, previewPaths, allFiles.size());
-        return Result.ok(resourceService.uploadResources(sectionId, subject, tag, year, price, shared, previewPaths, allFiles));
+        String[] node = resolveNode(nodeType, nodeId, sectionId);
+        log.info("POST /api/v1/resource/resources/upload nodeType={} nodeId={} tag={} year={} price={} shared={} previewPaths={} files={}",
+                node[0], node[1], tag, year, price, shared, previewPaths, allFiles.size());
+        return Result.ok(resourceService.uploadResources(node[0], Long.valueOf(node[1]), subject, tag, year, price, shared, previewPaths, allFiles));
+    }
+
+    /** 解析节点参数：优先 nodeType+nodeId，兼容仅传 sectionId 的老客户端 */
+    private String[] resolveNode(String nodeType, Long nodeId, Long sectionId) {
+        if (nodeType != null && !nodeType.isBlank() && nodeId != null) {
+            return new String[]{nodeType, String.valueOf(nodeId)};
+        }
+        if (sectionId != null) {
+            return new String[]{"section", String.valueOf(sectionId)};
+        }
+        throw new BusinessException(400, "请提供 nodeType + nodeId（或兼容的 sectionId）");
     }
 
     /** 删除资源（含磁盘文件） */

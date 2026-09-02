@@ -12,8 +12,11 @@ import java.util.List;
 @Repository
 public interface ResourceFileRepository extends JpaRepository<ResourceFile, Long> {
 
-    /** 按小节查询资源文件（创建时间倒序） */
-    List<ResourceFile> findBySectionIdOrderByCreatedAtDesc(Long sectionId);
+    /** 按节点查询资源文件（创建时间倒序） */
+    List<ResourceFile> findByNodeTypeAndNodeIdOrderByCreatedAtDesc(String nodeType, Long nodeId);
+
+    /** 按节点批量查询（同 nodeType，创建时间倒序，用于聚合子级资源） */
+    List<ResourceFile> findByNodeTypeAndNodeIdInOrderByCreatedAtDesc(String nodeType, List<Long> nodeIds);
 
     /** 按审核状态查询（创建时间倒序，用于待审核列表） */
     List<ResourceFile> findByStatusOrderByCreatedAtDesc(String status);
