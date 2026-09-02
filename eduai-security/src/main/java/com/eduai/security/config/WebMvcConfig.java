@@ -1,8 +1,10 @@
 package com.eduai.security.config;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -20,10 +22,19 @@ import java.nio.file.Paths;
  */
 @Slf4j
 @Configuration
+@RequiredArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
+
+    private final MetricInterceptor metricInterceptor;
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        // 在线心跳：所有请求进来刷新在线时间戳；未登录请求在拦截器内自然跳过
+        registry.addInterceptor(metricInterceptor).addPathPatterns("/**");
+    }
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {

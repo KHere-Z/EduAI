@@ -2,6 +2,7 @@ package com.eduai.system.controller;
 
 import com.eduai.common.BusinessException;
 import com.eduai.common.Result;
+import com.eduai.common.service.MetricService;
 import com.eduai.system.dto.DownloadFile;
 import com.eduai.system.dto.PreviewFile;
 import com.eduai.system.dto.ReorderDTO;
@@ -41,6 +42,7 @@ import java.util.Map;
 public class ResourceController {
 
     private final ResourceService resourceService;
+    private final MetricService metricService;
 
     // ==================== 教材 ====================
 
@@ -221,6 +223,7 @@ public class ResourceController {
     /** 下载资源文件（流式，避免整文件载入内存） */
     @GetMapping("/resources/{id}/download")
     public ResponseEntity<Resource> downloadResource(@PathVariable Long id) {
+        metricService.incrDownload();
         DownloadFile df = resourceService.downloadResource(id);
         String encodedName = URLEncoder.encode(df.fileName(), StandardCharsets.UTF_8)
                 .replace("+", "%20");

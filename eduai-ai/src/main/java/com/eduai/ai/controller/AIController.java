@@ -9,6 +9,7 @@ import com.eduai.ai.service.AIChatService;
 import com.eduai.ai.service.AiAnimationHistoryService;
 import com.eduai.common.Result;
 import com.eduai.common.annotation.RateLimit;
+import com.eduai.common.service.MetricService;
 import com.eduai.common.storage.CosStorageService;
 import com.eduai.security.service.PointService;
 import com.eduai.security.service.impl.PointServiceImpl;
@@ -54,6 +55,7 @@ public class AIController {
     private final PointService pointService;
     private final CosStorageService cosStorageService;
     private final AiAnimationHistoryService aiAnimationHistoryService;
+    private final MetricService metricService;
 
     @Value("${eduai.upload.dir:uploads}")
     private String uploadDir;
@@ -102,6 +104,7 @@ public class AIController {
     public CompletableFuture<Result<String>> analyzeWrongQuestion(@RequestBody ChatRequest request) {
         pointService.consume(StpUtil.getLoginIdAsLong(),
                 PointServiceImpl.COST_AI_WRONG_ANALYSIS, "AI错题分析");
+        metricService.markActive("wrongAnalysis", StpUtil.getLoginIdAsLong());
         log.info("POST /api/v1/ai/wrong-analysis messages={} imageUrl={}",
                 request.getMessages() != null ? request.getMessages().size() : 0,
                 request.getImageUrl());
@@ -143,6 +146,7 @@ public class AIController {
     public CompletableFuture<Result<String>> analyzeExam(@RequestBody ChatRequest request) {
         pointService.consume(StpUtil.getLoginIdAsLong(),
                 PointServiceImpl.COST_AI_EXAM_ANALYSIS, "AI试卷分析");
+        metricService.markActive("examAnalysis", StpUtil.getLoginIdAsLong());
         log.info("POST /api/v1/ai/exam-analysis messages={} imageUrl={}",
                 request.getMessages() != null ? request.getMessages().size() : 0,
                 request.getImageUrl());
@@ -159,6 +163,7 @@ public class AIController {
     public CompletableFuture<Result<String>> analyzeAnimation(@RequestBody ChatRequest request) {
         pointService.consume(StpUtil.getLoginIdAsLong(),
                 PointServiceImpl.COST_AI_ANIMATION, "AI动图");
+        metricService.markActive("aiAnimation", StpUtil.getLoginIdAsLong());
         log.info("POST /api/v1/ai/animation imageUrl={}",
                 request.getImageUrl());
         return aiChatService.analyzeAnimation(request).thenApply(Result::ok);
