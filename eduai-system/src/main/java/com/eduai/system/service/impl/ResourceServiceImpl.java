@@ -48,6 +48,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -235,6 +236,9 @@ public class ResourceServiceImpl implements ResourceService {
         ResourceTextbook textbook = textbookRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "教材不存在"));
 
+        // 先删该教材下所有层级资源（直接挂教材 + 章节 + 小节）
+        deleteFilesUnderNode("textbook", id);
+
         List<ResourceChapter> chapters = chapterRepository.findByTextbookIdOrderBySortOrderAsc(id);
         for (ResourceChapter chapter : chapters) {
             deleteSectionsByChapterId(chapter.getId());
@@ -314,6 +318,9 @@ public class ResourceServiceImpl implements ResourceService {
         ResourceChapter chapter = chapterRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "章节不存在"));
 
+        // 先删该章节下所有层级资源（直接挂章节 + 小节）
+        deleteFilesUnderNode("chapter", id);
+
         deleteSectionsByChapterId(id);
         chapterRepository.delete(chapter);
         log.info("删除章节 id={} name={}", id, chapter.getName());
@@ -386,7 +393,7 @@ public class ResourceServiceImpl implements ResourceService {
         ResourceSection section = sectionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "小节不存在"));
 
-        deleteFilesBySectionId(id);
+        deleteFilesUnderNode("section", id);
         sectionRepository.delete(section);
         log.info("删除小节 id={} name={}", id, section.getName());
     }
@@ -395,10 +402,10 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ResourceFileVO> listResources(Long sectionId, String subject) {
+    public List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject) {
         checkAuthenticated();
         CurrentUser ctx = currentUser();
-        return fileRepository.findBySectionIdOrderByCreatedAtDesc(sectionId)
+        return collectFilesUnderNode(nodeType, nodeId)
                 .stream()
                 .filter(f -> canReadResource(f, ctx))
                 // 仅展示已通过资源 + 本人上传的（含待审核/驳回，用于展示审核进度）
@@ -410,12 +417,11 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional
-    public List<ResourceFileVO> uploadResources(Long sectionId, String subject, String tag,
+    public List<ResourceFileVO> uploadResources(String nodeType, Long nodeId, String subject, String tag,
                                                 String year, Integer price, Boolean shared,
                                                 String previewPaths, List<MultipartFile> files) {
         User uploader = checkTeacherOrAdmin();
-        sectionRepository.findById(sectionId)
-                .orElseThrow(() -> new BusinessException(404, "小节不存在"));
+        checkNodeExists(nodeType, nodeId);
 
         if (files == null || files.isEmpty()) {
             throw new BusinessException(400, "文件不能为空");
@@ -439,7 +445,7 @@ public class ResourceServiceImpl implements ResourceService {
                 continue;
             }
             String previewPath = i < previewPathList.size() ? previewPathList.get(i) : null;
-            ResourceFile saved = saveFile(sectionId, subject, tag, year, price, isShared, author,
+            ResourceFile saved = saveFile(nodeType, nodeId, subject, tag, year, price, isShared, author,
                     uploader.getId(), status, previewPath, file);
             result.add(toVO(saved));
         }
@@ -447,7 +453,7 @@ public class ResourceServiceImpl implements ResourceService {
         if (result.isEmpty()) {
             throw new BusinessException(400, "文件不能为空");
         }
-        log.info("{} 上传学习资源: sectionId={}, tag={}, shared={}, 数量={}", author, sectionId, tag, isShared, result.size());
+        log.info("{} 上传学习资源: nodeType={}, nodeId={}, tag={}, shared={}, 数量={}", author, nodeType, nodeId, tag, isShared, result.size());
         return result;
     }
 
@@ -598,7 +604,7 @@ public class ResourceServiceImpl implements ResourceService {
     // ==================== 内部方法 ====================
 
     /** 落盘并入库单个文件 */
-    private ResourceFile saveFile(Long sectionId, String subject, String tag, String year,
+    private ResourceFile saveFile(String nodeType, Long nodeId, String subject, String tag, String year,
                                   Integer price, boolean shared, String author, Long uploaderId,
                                   String status, String previewPath, MultipartFile file) {
         String originalName = file.getOriginalFilename();
@@ -626,7 +632,8 @@ public class ResourceServiceImpl implements ResourceService {
         }
 
         ResourceFile resource = ResourceFile.builder()
-                .sectionId(sectionId)
+                .nodeType(nodeType)
+                .nodeId(nodeId)
                 .subject(subject == null || subject.isBlank() ? "math" : subject)
                 .type(tag)
                 .year(year)
@@ -657,19 +664,66 @@ public class ResourceServiceImpl implements ResourceService {
         }
     }
 
-    /** 级联删除某章节下的所有小节及其资源文件 */
+    /** 级联删除某章节下的所有小节实体（资源已由 deleteFilesUnderNode 统一删除） */
     private void deleteSectionsByChapterId(Long chapterId) {
         List<ResourceSection> sections = sectionRepository.findByChapterIdOrderBySortOrderAsc(chapterId);
         for (ResourceSection section : sections) {
-            deleteFilesBySectionId(section.getId());
             sectionRepository.delete(section);
         }
     }
 
-    /** 删除某小节下的所有资源文件（含物理文件） */
-    private void deleteFilesBySectionId(Long sectionId) {
-        List<ResourceFile> files = fileRepository.findBySectionIdOrderByCreatedAtDesc(sectionId);
-        for (ResourceFile file : files) {
+    /** 校验节点存在（按 nodeType 查对应层级实体） */
+    private void checkNodeExists(String nodeType, Long nodeId) {
+        if (nodeType == null || nodeId == null) {
+            throw new BusinessException(400, "nodeType/nodeId 不能为空");
+        }
+        switch (nodeType) {
+            case "textbook" -> textbookRepository.findById(nodeId)
+                    .orElseThrow(() -> new BusinessException(404, "教材不存在"));
+            case "chapter" -> chapterRepository.findById(nodeId)
+                    .orElseThrow(() -> new BusinessException(404, "章节不存在"));
+            case "section" -> sectionRepository.findById(nodeId)
+                    .orElseThrow(() -> new BusinessException(404, "小节不存在"));
+            default -> throw new BusinessException(400, "无效的 nodeType: " + nodeType);
+        }
+    }
+
+    /** 聚合收集某节点及其所有子级节点上挂的资源文件（按创建时间倒序） */
+    private List<ResourceFile> collectFilesUnderNode(String nodeType, Long nodeId) {
+        List<ResourceFile> files = new ArrayList<>();
+        switch (nodeType) {
+            case "textbook" -> {
+                files.addAll(fileRepository.findByNodeTypeAndNodeIdOrderByCreatedAtDesc("textbook", nodeId));
+                List<Long> chapterIds = chapterRepository.findByTextbookIdOrderBySortOrderAsc(nodeId)
+                        .stream().map(ResourceChapter::getId).collect(Collectors.toList());
+                if (!chapterIds.isEmpty()) {
+                    files.addAll(fileRepository.findByNodeTypeAndNodeIdInOrderByCreatedAtDesc("chapter", chapterIds));
+                    List<Long> sectionIds = sectionRepository.findByChapterIdIn(chapterIds)
+                            .stream().map(ResourceSection::getId).collect(Collectors.toList());
+                    if (!sectionIds.isEmpty()) {
+                        files.addAll(fileRepository.findByNodeTypeAndNodeIdInOrderByCreatedAtDesc("section", sectionIds));
+                    }
+                }
+            }
+            case "chapter" -> {
+                files.addAll(fileRepository.findByNodeTypeAndNodeIdOrderByCreatedAtDesc("chapter", nodeId));
+                List<Long> sectionIds = sectionRepository.findByChapterIdOrderBySortOrderAsc(nodeId)
+                        .stream().map(ResourceSection::getId).collect(Collectors.toList());
+                if (!sectionIds.isEmpty()) {
+                    files.addAll(fileRepository.findByNodeTypeAndNodeIdInOrderByCreatedAtDesc("section", sectionIds));
+                }
+            }
+            case "section" ->
+                    files.addAll(fileRepository.findByNodeTypeAndNodeIdOrderByCreatedAtDesc("section", nodeId));
+            default -> throw new BusinessException(400, "无效的 nodeType: " + nodeType);
+        }
+        files.sort(Comparator.comparing(ResourceFile::getCreatedAt).reversed());
+        return files;
+    }
+
+    /** 删除某节点及其所有子级节点上挂的资源文件（含物理文件） */
+    private void deleteFilesUnderNode(String nodeType, Long nodeId) {
+        for (ResourceFile file : collectFilesUnderNode(nodeType, nodeId)) {
             deletePhysicalFile(file.getFilePath());
             fileRepository.delete(file);
         }
@@ -719,6 +773,8 @@ public class ResourceServiceImpl implements ResourceService {
     private ResourceFileVO toVO(ResourceFile r) {
         return ResourceFileVO.builder()
                 .id(r.getId())
+                .nodeType(r.getNodeType())
+                .nodeId(r.getNodeId())
                 .sectionId(r.getSectionId())
                 .subject(r.getSubject())
                 .type(r.getType())

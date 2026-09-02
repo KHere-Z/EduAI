@@ -19,6 +19,8 @@ import java.time.LocalDateTime;
 public class ResourceFileVO {
 
     private Long id;
+    private String nodeType;
+    private Long nodeId;
     private Long sectionId;
     private String subject;
 

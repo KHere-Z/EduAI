@@ -16,6 +16,9 @@ public interface ResourceSectionRepository extends JpaRepository<ResourceSection
     /** 按章节查询小节（排序升序） */
     List<ResourceSection> findByChapterIdOrderBySortOrderAsc(Long chapterId);
 
+    /** 按章节批量查询小节（用于教材/章节聚合子级资源） */
+    List<ResourceSection> findByChapterIdIn(List<Long> chapterIds);
+
     /** 取同章节下排序最大的小节（用于新建时 sort_order = max + 1） */
     Optional<ResourceSection> findTopByChapterIdOrderBySortOrderDesc(Long chapterId);
 }
