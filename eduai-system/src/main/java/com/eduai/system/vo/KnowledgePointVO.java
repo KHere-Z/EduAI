@@ -22,6 +22,7 @@ public class KnowledgePointVO {
     /** 所属老师 UID（8位字符串，与 auth.user.uid 同源，前端 isOwnKp 用） */
     private String teacherId;
     private String gradeLevel;
+    private String description;
     private Long parentId;
     private Integer sortOrder;
     private LocalDateTime createdAt;

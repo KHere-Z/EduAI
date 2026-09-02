@@ -20,6 +20,9 @@ public class KnowledgePointDTO {
     /** 年级·学期（如"初三·上学期"） */
     private String gradeLevel;
 
+    /** 知识点描述 */
+    private String description;
+
     /** 父知识点ID（树形结构） */
     private Long parentId;
 

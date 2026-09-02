@@ -1,13 +1,8 @@
 package com.eduai.system.service;
 
-import com.eduai.system.dto.DownloadFile;
 import com.eduai.system.dto.KnowledgePointDTO;
 import com.eduai.system.vo.KnowledgePointPageVO;
 import com.eduai.system.vo.KnowledgePointVO;
-import com.eduai.system.vo.KpResourceVO;
-import org.springframework.web.multipart.MultipartFile;
-
-import java.util.List;
 
 /**
  * 知识点 Service
@@ -28,18 +23,4 @@ public interface KnowledgePointService {
 
     /** 删除知识点 */
     void delete(Long id);
-
-    // ==================== 知识点资源 ====================
-
-    /** 上传资源文件 */
-    KpResourceVO uploadResource(Long kpId, MultipartFile file, String tag);
-
-    /** 资源列表 */
-    List<KpResourceVO> listResources(Long kpId);
-
-    /** 下载资源（流式，返回文件名 + 磁盘资源句柄） */
-    DownloadFile downloadResource(Long id);
-
-    /** 删除资源 */
-    void deleteResource(Long id);
 }
