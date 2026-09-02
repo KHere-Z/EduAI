@@ -17,6 +17,10 @@ public class CorsConfig {
         CorsConfiguration config = new CorsConfiguration();
         config.addAllowedOriginPattern("http://localhost:*");
         config.addAllowedOriginPattern("http://127.0.0.1:*");
+        config.addAllowedOriginPattern("https://www.zhixueai.club");
+        config.addAllowedOriginPattern("https://zhixueai.club");
+        config.addAllowedOriginPattern("http://www.zhixueai.club");
+        config.addAllowedOriginPattern("http://zhixueai.club");
         config.setAllowCredentials(true);
         config.addAllowedHeader("*");
         config.addAllowedMethod("*");
