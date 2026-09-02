@@ -123,7 +123,7 @@ public class MockPaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public String handleNotify(String channel, String body) {
+    public String handleNotify(String channel, String body, Map<String, String> headers) {
         log.info("[支付回调-{}] body={}", channel, body);
         return "success";
     }

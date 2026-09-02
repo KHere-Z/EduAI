@@ -16,11 +16,6 @@ ALTER TABLE knowledge_points
 -- 3. teacher_uid 索引（可见性过滤按 teacher_uid 查询）
 CREATE INDEX idx_kp_teacher_uid ON knowledge_points (teacher_uid);
 
--- 4. kp_resources 加 teacher_uid（上传者 uid）
-ALTER TABLE kp_resources
-    ADD COLUMN teacher_uid BIGINT NULL
-        COMMENT '上传者UID（为空表示历史数据，仅管理员可删）';
-
 -- ============================================================
 -- 回填说明（按需执行）
 -- 现有知识点 teacher_uid 为空 → 后端视为「历史共享数据」：

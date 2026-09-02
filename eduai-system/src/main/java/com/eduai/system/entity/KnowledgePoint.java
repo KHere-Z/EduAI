@@ -39,6 +39,10 @@ public class KnowledgePoint {
     @Column(name = "grade_level", length = 50)
     private String gradeLevel;
 
+    /** 知识点描述 */
+    @Column(columnDefinition = "TEXT")
+    private String description;
+
     /** 父知识点ID（树形结构） */
     @Column(name = "parent_id")
     private Long parentId;

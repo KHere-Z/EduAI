@@ -30,4 +30,10 @@ public class UpdateProfileRequest {
 
     /** 学科列表（如 ["数学","物理"]） */
     private List<String> subjects;
+
+    /** 年级（学生） */
+    private String grade;
+
+    /** 学校（学生） */
+    private String school;
 }

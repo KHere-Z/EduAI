@@ -23,5 +23,5 @@ public interface PaymentService {
     Result<Void> mockPay(Long userId, String orderId);
 
     /** 处理渠道异步回调，返回给渠道的应答文本（如 "success"） */
-    String handleNotify(String channel, String body);
+    String handleNotify(String channel, String body, Map<String, String> headers);
 }
