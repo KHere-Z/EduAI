@@ -153,6 +153,15 @@ public class AdminController {
         return Result.ok(adminService.getStats());
     }
 
+    /**
+     * 实时埋点统计（在线人数 / 三个 AI 功能活跃数 / 累计下载量）
+     */
+    @GetMapping("/stats/realtime")
+    public Result<RealtimeStatsVO> getRealtimeStats() {
+        log.info("GET /api/v1/admin/stats/realtime");
+        return Result.ok(adminService.getRealtimeStats());
+    }
+
     // ==================== 系统设置 ====================
 
     /**

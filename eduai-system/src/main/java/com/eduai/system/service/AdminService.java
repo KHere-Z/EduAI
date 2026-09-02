@@ -77,6 +77,11 @@ public interface AdminService {
      */
     AdminStatsVO getStats();
 
+    /**
+     * 实时埋点统计（在线人数/三个 AI 功能活跃数/累计下载量）
+     */
+    RealtimeStatsVO getRealtimeStats();
+
     // ==================== 系统设置 ====================
 
     /**

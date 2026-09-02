@@ -3,6 +3,7 @@ package com.eduai.system.service.impl;
 import cn.dev33.satoken.stp.StpUtil;
 import com.eduai.ai.config.DeepSeekConfig;
 import com.eduai.common.BusinessException;
+import com.eduai.common.service.MetricService;
 import com.eduai.common.util.PasswordUtil;
 import com.eduai.security.entity.Organization;
 import com.eduai.security.entity.Teacher;
@@ -54,6 +55,7 @@ public class AdminServiceImpl implements AdminService {
     private final AiModelRepository aiModelRepository;
     private final DeepSeekConfig deepSeekConfig;
     private final QuestionRepository questionRepository;
+    private final MetricService metricService;
 
     // ==================== 权限检查 ====================
 
@@ -685,6 +687,21 @@ public class AdminServiceImpl implements AdminService {
                 .relationCount(relationCount)
                 .sessionCount(sessionCount)
                 .enrollmentCount(enrollmentCount)
+                .build();
+    }
+
+    /**
+     * 实时埋点统计（在线人数 / 三个 AI 功能活跃数 / 累计下载量）
+     */
+    @Override
+    public RealtimeStatsVO getRealtimeStats() {
+        checkAdmin();
+        return RealtimeStatsVO.builder()
+                .onlineCount(metricService.onlineCount())
+                .examAnalysisActive(metricService.activeCount("examAnalysis"))
+                .aiAnimationActive(metricService.activeCount("aiAnimation"))
+                .wrongAnalysisActive(metricService.activeCount("wrongAnalysis"))
+                .resourceDownloadTotal(metricService.downloadTotal())
                 .build();
     }
 
