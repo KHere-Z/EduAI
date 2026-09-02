@@ -55,10 +55,11 @@ public interface ResourceService {
     void deleteSection(Long id);
 
     // ==================== 资源文件 ====================
-    List<ResourceFileVO> listResources(Long sectionId, String subject);
+    /** 查询某节点资源（含子级聚合），nodeType ∈ textbook/chapter/section */
+    List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject);
 
     /** 上传资源（多文件），previewPaths 为 JSON 字符串数组，与 files[] 按索引对齐 */
-    List<ResourceFileVO> uploadResources(Long sectionId, String subject, String tag,
+    List<ResourceFileVO> uploadResources(String nodeType, Long nodeId, String subject, String tag,
                                          String year, Integer price, Boolean shared,
                                          String previewPaths, List<MultipartFile> files);
 

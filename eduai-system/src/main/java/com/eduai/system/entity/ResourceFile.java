@@ -23,8 +23,16 @@ public class ResourceFile {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** 所属小节ID，关联 resource_section.id */
-    @Column(name = "section_id", nullable = false)
+    /** 节点类型：textbook/chapter/section（资源可挂任意层级） */
+    @Column(name = "node_type", nullable = false, length = 20)
+    private String nodeType;
+
+    /** 节点ID：对应层级实体主键 */
+    @Column(name = "node_id", nullable = false)
+    private Long nodeId;
+
+    /** 所属小节ID（仅存量兼容，新数据不再写入） */
+    @Column(name = "section_id")
     private Long sectionId;
 
     /** 学科 key，如 math */
