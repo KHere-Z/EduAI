@@ -202,6 +202,11 @@ public class AuthServiceImpl implements AuthService {
             }
         }
 
+        // 年级 / 学校（学生个人中心可编辑，写 students 表）
+        if (req.getGrade() != null || req.getSchool() != null) {
+            saveStudentGradeSchool(user, req.getGrade(), req.getSchool());
+        }
+
         // 手机号变更需验证唯一性
         if (req.getPhone() != null && !req.getPhone().isBlank()
                 && !req.getPhone().equals(user.getPhone())) {
@@ -214,6 +219,38 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
         log.info("个人信息已更新: uid={}", user.getUid());
         return toUserVO(user);
+    }
+
+    /** 学生档案：写 grade/school 到 students 表（无记录则自动创建） */
+    private void saveStudentGradeSchool(User user, String grade, String school) {
+        if (user.getRoleType() == null || user.getRoleType() != 4) {
+            return;
+        }
+        Integer cnt = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM students WHERE user_id = ?", Integer.class, user.getId());
+        if (cnt == null || cnt == 0) {
+            String name = user.getRealName();
+            if (name == null || name.isBlank()) name = user.getNickname();
+            if (name == null || name.isBlank()) name = "新同学";
+            jdbcTemplate.update(
+                    "INSERT INTO students (name, user_id, grade, school, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())",
+                    name, user.getId(), grade, school);
+            return;
+        }
+        StringBuilder sql = new StringBuilder("UPDATE students SET ");
+        List<Object> args = new ArrayList<>();
+        if (grade != null) {
+            sql.append("grade = ?, ");
+            args.add(grade);
+        }
+        if (school != null) {
+            sql.append("school = ?, ");
+            args.add(school);
+        }
+        sql.setLength(sql.length() - 2); // 去掉末尾 ", "
+        sql.append(" WHERE user_id = ?");
+        args.add(user.getId());
+        jdbcTemplate.update(sql.toString(), args.toArray());
     }
 
     @Override
@@ -607,6 +644,18 @@ public class AuthServiceImpl implements AuthService {
             });
         }
 
+        // 学生扩展字段（年级 / 学校，从 students 表读）
+        String grade = null, school = null;
+        if (user.getRoleType() != null && user.getRoleType() == 4) {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT grade, school FROM students WHERE user_id = ?", user.getId());
+            if (!rows.isEmpty()) {
+                Map<String, Object> row = rows.get(0);
+                grade = (String) row.get("grade");
+                school = (String) row.get("school");
+            }
+        }
+
         // 微信绑定状态
         boolean bindWechat = wechatRepository.findByUserUid(user.getUid()).isPresent();
 
@@ -627,6 +676,8 @@ public class AuthServiceImpl implements AuthService {
                 .subjects(subjects)
                 .studentUids(studentUids)
                 .teacherUid(teacherUid)
+                .grade(grade)
+                .school(school)
                 .orgId(orgId)
                 .orgName(orgName)
                 .title(title)

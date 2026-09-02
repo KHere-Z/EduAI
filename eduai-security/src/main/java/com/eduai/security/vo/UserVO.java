@@ -47,6 +47,12 @@ public class UserVO {
     /** 学生专属：老师UID */
     private Long teacherUid;
 
+    /** 学生专属：年级 */
+    private String grade;
+
+    /** 学生专属：所在学校 */
+    private String school;
+
     // ===== 教师扩展字段（从 teachers 表查询） =====
     private Long orgId;
     private String orgName;
