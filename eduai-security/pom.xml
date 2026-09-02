@@ -23,6 +23,13 @@
             <artifactId>spring-data-jpa</artifactId>
         </dependency>
 
+        <!-- 微信支付 APIv3 官方 SDK（Native 下单签名 + 回调验签/解密） -->
+        <dependency>
+            <groupId>com.github.wechatpay-apiv3</groupId>
+            <artifactId>wechatpay-java</artifactId>
+            <version>0.2.14</version>
+        </dependency>
+
         <!-- 以下依赖由父 POM 统一管理版本，子模块自动继承：
              spring-boot-starter-web / spring-boot-starter-data-jpa / hutool-all / lombok 等 -->
     </dependencies>

@@ -3,22 +3,23 @@ package com.eduai.security.controller;
 import cn.dev33.satoken.stp.StpUtil;
 import com.eduai.common.Result;
 import com.eduai.security.service.PaymentService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 支付接口（开发阶段为 Mock 实现）
+ * 支付接口
  * <p>
- * 生产环境接入真实支付宝/微信 SDK 时，实现 {@link PaymentService} 并新增
- * {@code @Profile("prod")} 的 Controller（本 Mock Controller 不注册）。
+ * 开发环境 {@code channel=mock}（{@link com.eduai.security.service.impl.MockPaymentServiceImpl}），
+ * 生产环境 {@code channel=wechat}（{@link com.eduai.security.service.impl.WechatPaymentServiceImpl}），
+ * 由 Spring 按 Profile 自动装配，前端无需改动。
  */
 @Slf4j
 @RestController
-@Profile("!prod")   // Mock 支付仅在非生产环境注册，生产环境不暴露 mock 接口
 @RequestMapping("/api/v1/payment")
 @RequiredArgsConstructor
 public class PaymentController {
@@ -54,13 +55,23 @@ public class PaymentController {
 
     /** 支付宝异步回调（生产环境实现） */
     @PostMapping("/notify/alipay")
-    public String alipayNotify(@RequestBody String body) {
-        return paymentService.handleNotify("alipay", body);
+    public String alipayNotify(@RequestBody String body, HttpServletRequest request) {
+        return paymentService.handleNotify("alipay", body, collectNotifyHeaders(request));
     }
 
     /** 微信支付异步回调（生产环境实现） */
     @PostMapping("/notify/wechat")
-    public String wechatNotify(@RequestBody String body) {
-        return paymentService.handleNotify("wechat", body);
+    public String wechatNotify(@RequestBody String body, HttpServletRequest request) {
+        return paymentService.handleNotify("wechat", body, collectNotifyHeaders(request));
+    }
+
+    /** 收集回调验签所需的关键请求头（微信 APIv3 回调验签依赖） */
+    private Map<String, String> collectNotifyHeaders(HttpServletRequest request) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        headers.put("Wechatpay-Signature", request.getHeader("Wechatpay-Signature"));
+        headers.put("Wechatpay-Timestamp", request.getHeader("Wechatpay-Timestamp"));
+        headers.put("Wechatpay-Nonce", request.getHeader("Wechatpay-Nonce"));
+        headers.put("Wechatpay-Serial", request.getHeader("Wechatpay-Serial"));
+        return headers;
     }
 }
