@@ -9,6 +9,7 @@ import com.eduai.system.entity.ResourceChapter;
 import com.eduai.system.entity.ResourceSection;
 import com.eduai.system.entity.ResourceTextbook;
 import com.eduai.system.vo.ArchiveEntryVO;
+import com.eduai.system.vo.ResourceFilePageVO;
 import com.eduai.system.vo.ResourceFileVO;
 import com.eduai.system.vo.ResourceReviewVO;
 import org.springframework.web.multipart.MultipartFile;
@@ -55,8 +56,12 @@ public interface ResourceService {
     void deleteSection(Long id);
 
     // ==================== 资源文件 ====================
-    /** 查询某节点资源（含子级聚合），nodeType ∈ textbook/chapter/section */
-    List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject);
+    /** 查询某节点资源（含子级聚合），nodeType ∈ textbook/chapter/section；type/year 可选过滤 */
+    List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year);
+
+    /** 查询某节点资源（含子级聚合，分页）：total 为过滤后聚合全量条数，list 为切片 */
+    ResourceFilePageVO listResourcesPage(String nodeType, Long nodeId, String subject, String type, String year,
+                                         int page, int pageSize);
 
     /** 上传资源（多文件），previewPaths 为 JSON 字符串数组，与 files[] 按索引对齐 */
     List<ResourceFileVO> uploadResources(String nodeType, Long nodeId, String subject, String tag,
