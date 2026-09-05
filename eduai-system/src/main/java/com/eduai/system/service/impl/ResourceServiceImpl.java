@@ -27,6 +27,7 @@ import com.eduai.system.repository.ResourceTextbookRepository;
 import com.eduai.system.service.ResourcePreviewService;
 import com.eduai.system.service.ResourceService;
 import com.eduai.system.vo.ArchiveEntryVO;
+import com.eduai.system.vo.ResourceFilePageVO;
 import com.eduai.system.vo.ResourceFileVO;
 import com.eduai.system.vo.ResourceReviewVO;
 import lombok.RequiredArgsConstructor;
@@ -402,7 +403,28 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject) {
+    public List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year) {
+        return listResourcesFiltered(nodeType, nodeId, type, year);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ResourceFilePageVO listResourcesPage(String nodeType, Long nodeId, String subject, String type, String year,
+                                                int page, int pageSize) {
+        List<ResourceFileVO> all = listResourcesFiltered(nodeType, nodeId, type, year);
+        long total = all.size();
+        int from = (page - 1) * pageSize;
+        if (from >= total) {
+            return ResourceFilePageVO.builder()
+                    .list(List.of()).total(total).page(page).pageSize(pageSize).build();
+        }
+        int to = (int) Math.min((long) from + pageSize, total);
+        return ResourceFilePageVO.builder()
+                .list(all.subList(from, to)).total(total).page(page).pageSize(pageSize).build();
+    }
+
+    /** 聚合 + 鉴权过滤 + type/year 过滤 + VO 转换，供全量与分页两种列表共用 */
+    private List<ResourceFileVO> listResourcesFiltered(String nodeType, Long nodeId, String type, String year) {
         checkAuthenticated();
         CurrentUser ctx = currentUser();
         return collectFilesUnderNode(nodeType, nodeId)
@@ -411,6 +433,8 @@ public class ResourceServiceImpl implements ResourceService {
                 // 仅展示已通过资源 + 本人上传的（含待审核/驳回，用于展示审核进度）
                 .filter(f -> "approved".equals(f.getStatus())
                         || (ctx.userId != null && ctx.userId.equals(f.getUploaderId())))
+                .filter(f -> type == null || type.isBlank() || type.equals(f.getType()))
+                .filter(f -> year == null || year.isBlank() || year.equals(f.getYear()))
                 .map(this::toVO)
                 .collect(Collectors.toList());
     }
@@ -717,7 +741,9 @@ public class ResourceServiceImpl implements ResourceService {
                     files.addAll(fileRepository.findByNodeTypeAndNodeIdOrderByCreatedAtDesc("section", nodeId));
             default -> throw new BusinessException(400, "无效的 nodeType: " + nodeType);
         }
-        files.sort(Comparator.comparing(ResourceFile::getCreatedAt).reversed());
+        // 稳定排序：created_at DESC, id DESC，保证分页翻页不重不漏
+        files.sort(Comparator.comparing(ResourceFile::getCreatedAt).reversed()
+                .thenComparing(Comparator.comparing(ResourceFile::getId).reversed()));
         return files;
     }
 

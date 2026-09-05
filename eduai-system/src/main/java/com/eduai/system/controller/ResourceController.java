@@ -166,16 +166,25 @@ public class ResourceController {
 
     // ==================== 资源文件 ====================
 
-    /** 资源列表（按任意层级节点，聚合子级） */
+    /** 资源列表（按任意层级节点，聚合子级；传 page 时分页返回 {list,total}，否则返回旧全量数组；可按 type/year 过滤） */
     @GetMapping("/resources")
-    public Result<List<ResourceFileVO>> listResources(
+    public Result<?> listResources(
             @RequestParam(required = false) String nodeType,
             @RequestParam(required = false) Long nodeId,
             @RequestParam(required = false) Long sectionId,
-            @RequestParam(required = false) String subject) {
+            @RequestParam(required = false) String subject,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String year,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer pageSize) {
         // 兼容旧客户端：只传 sectionId 时映射为 section 节点
         String[] node = resolveNode(nodeType, nodeId, sectionId);
-        return Result.ok(resourceService.listResources(node[0], Long.valueOf(node[1]), subject));
+        Long resolvedNodeId = Long.valueOf(node[1]);
+        if (page != null) {
+            int ps = pageSize != null ? pageSize : 20;
+            return Result.ok(resourceService.listResourcesPage(node[0], resolvedNodeId, subject, type, year, page, ps));
+        }
+        return Result.ok(resourceService.listResources(node[0], resolvedNodeId, subject, type, year));
     }
 
     /** 上传资源（多文件，挂任意层级节点） */
