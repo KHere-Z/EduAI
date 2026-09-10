@@ -15,8 +15,10 @@ import com.wechat.pay.java.core.http.DefaultHttpClientBuilder;
 import com.wechat.pay.java.core.http.HttpClient;
 import com.wechat.pay.java.core.http.HttpMethod;
 import com.wechat.pay.java.core.http.HttpRequest;
+import com.wechat.pay.java.core.http.HttpResponse;
 import com.wechat.pay.java.core.http.JsonRequestBody;
 import com.wechat.pay.java.core.http.JsonResponseBody;
+import com.wechat.pay.java.core.http.ResponseBody;
 import com.wechat.pay.java.core.notification.NotificationConfig;
 import com.wechat.pay.java.core.notification.NotificationParser;
 import com.wechat.pay.java.core.notification.RSAPublicKeyNotificationConfig;
@@ -261,7 +263,25 @@ public class WechatPaymentServiceImpl implements PaymentService {
                 .body(new JsonRequestBody.Builder().body(json).build())
                 .build();
 
-        JsonResponseBody responseBody = client().execute(request, JsonResponseBody.class).getServiceResponse();
-        return responseBody.getBody();
+        HttpResponse<JsonResponseBody> response = client().execute(request, JsonResponseBody.class);
+        JsonResponseBody serviceResp = response.getServiceResponse();
+        String respBody = serviceResp != null ? serviceResp.getBody() : null;
+
+        if (respBody == null || respBody.isBlank()) {
+            // 微信返回错误（非 2xx）时 serviceResponse 为空，错误详情在原始响应体
+            String raw = rawBodyString(response);
+            log.error("[微信支付] 下单失败，HTTP 原始响应: {}", raw);
+            throw new RuntimeException("微信下单失败: " + raw);
+        }
+        return respBody;
+    }
+
+    /** 从原始响应体提取字符串（错误码/错误信息） */
+    private String rawBodyString(HttpResponse<JsonResponseBody> response) {
+        ResponseBody rawBody = response.getBody();
+        if (rawBody instanceof JsonResponseBody) {
+            return ((JsonResponseBody) rawBody).getBody();
+        }
+        return String.valueOf(rawBody);
     }
 }
