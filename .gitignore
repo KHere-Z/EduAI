@@ -35,3 +35,7 @@ uploads/
 
 # Scratch / AI guide extracts
 _guide_*.txt
+
+# WeChat Pay private key (never commit)
+apiclient_key.pem
+*.pem
