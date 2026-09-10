@@ -263,20 +263,20 @@ public class WechatPaymentServiceImpl implements PaymentService {
                 .body(new JsonRequestBody.Builder().body(json).build())
                 .build();
 
+        // 注意：不能用 getServiceResponse().getBody()——SDK 对 JsonResponseBody 反序列化后 body 为 null，
+        // 真实响应体在 response.getBody()（原始响应体）里。
+        // 下单失败（非 2xx）时 SDK 会抛 ServiceException（含错误码/信息），由上层 catch 打印。
         HttpResponse<JsonResponseBody> response = client().execute(request, JsonResponseBody.class);
-        JsonResponseBody serviceResp = response.getServiceResponse();
-        String respBody = serviceResp != null ? serviceResp.getBody() : null;
+        String respBody = rawBodyString(response);
 
         if (respBody == null || respBody.isBlank()) {
-            // 微信返回错误（非 2xx）时 serviceResponse 为空，错误详情在原始响应体
-            String raw = rawBodyString(response);
-            log.error("[微信支付] 下单失败，HTTP 原始响应: {}", raw);
-            throw new RuntimeException("微信下单失败: " + raw);
+            log.error("[微信支付] 下单响应体为空，请求: {}", json);
+            throw new RuntimeException("微信下单失败: 空响应");
         }
         return respBody;
     }
 
-    /** 从原始响应体提取字符串（错误码/错误信息） */
+    /** 从原始响应体提取字符串（response.getBody()，而非 getServiceResponse()） */
     private String rawBodyString(HttpResponse<JsonResponseBody> response) {
         ResponseBody rawBody = response.getBody();
         if (rawBody instanceof JsonResponseBody) {
