@@ -10,7 +10,7 @@ import com.eduai.security.service.PointService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wechat.pay.java.core.Config;
-import com.wechat.pay.java.core.RSAAutoCertificateConfig;
+import com.wechat.pay.java.core.RSAPublicKeyConfig;
 import com.wechat.pay.java.core.http.DefaultHttpClientBuilder;
 import com.wechat.pay.java.core.http.HttpClient;
 import com.wechat.pay.java.core.http.HttpMethod;
@@ -19,6 +19,7 @@ import com.wechat.pay.java.core.http.JsonRequestBody;
 import com.wechat.pay.java.core.http.JsonResponseBody;
 import com.wechat.pay.java.core.notification.NotificationConfig;
 import com.wechat.pay.java.core.notification.NotificationParser;
+import com.wechat.pay.java.core.notification.RSAPublicKeyNotificationConfig;
 import com.wechat.pay.java.core.notification.RequestParam;
 import com.wechat.pay.java.service.payments.model.Transaction;
 import lombok.RequiredArgsConstructor;
@@ -57,24 +58,44 @@ public class WechatPaymentServiceImpl implements PaymentService {
             "year", 19900       // 199元
     );
 
-    /** 懒加载 SDK Config（RSAAutoCertificateConfig 首次使用会下载平台证书，故延迟初始化） */
+    /** 懒加载 SDK Config（微信支付公钥模式，下单签名用商户私钥） */
     private volatile Config config;
+
+    /** 懒加载通知验签配置（公钥模式验签回调用微信支付公钥） */
+    private volatile NotificationConfig notificationConfig;
 
     private Config config() {
         if (config == null) {
             synchronized (this) {
                 if (config == null) {
                     PaymentProperties.Wechat w = paymentProperties.getWechat();
-                    config = new RSAAutoCertificateConfig.Builder()
+                    config = new RSAPublicKeyConfig.Builder()
                             .merchantId(w.getMchId())
                             .privateKeyFromPath(w.getPrivateKeyPath())
                             .merchantSerialNumber(w.getCertSerialNo())
-                            .apiV3Key(w.getApiV3Key())
+                            .publicKeyFromPath(w.getPublicKeyPath())
+                            .publicKeyId(w.getPublicKeyId())
                             .build();
                 }
             }
         }
         return config;
+    }
+
+    private NotificationConfig notificationConfig() {
+        if (notificationConfig == null) {
+            synchronized (this) {
+                if (notificationConfig == null) {
+                    PaymentProperties.Wechat w = paymentProperties.getWechat();
+                    notificationConfig = new RSAPublicKeyNotificationConfig.Builder()
+                            .publicKeyFromPath(w.getPublicKeyPath())
+                            .publicKeyId(w.getPublicKeyId())
+                            .apiV3Key(w.getApiV3Key())
+                            .build();
+                }
+            }
+        }
+        return notificationConfig;
     }
 
     private HttpClient client() {
@@ -177,7 +198,7 @@ public class WechatPaymentServiceImpl implements PaymentService {
     public String handleNotify(String channel, String body, Map<String, String> headers) {
         try {
             // 1. 验签 + 解密（依赖回调 HTTP 头）
-            NotificationParser parser = new NotificationParser((NotificationConfig) config());
+            NotificationParser parser = new NotificationParser(notificationConfig());
             RequestParam requestParam = new RequestParam.Builder()
                     .serialNumber(headers.get("Wechatpay-Serial"))
                     .nonce(headers.get("Wechatpay-Nonce"))
