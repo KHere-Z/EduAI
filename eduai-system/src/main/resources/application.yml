@@ -139,6 +139,8 @@ eduai:
       api-v3-key: ${WECHAT_API_V3_KEY:}
       cert-serial-no: ${WECHAT_CERT_SERIAL_NO:}
       private-key-path: ${WECHAT_PRIVATE_KEY_PATH:}
+      public-key-path: ${WECHAT_PUBLIC_KEY_PATH:}
+      public-key-id: ${WECHAT_PUBLIC_KEY_ID:}
       notify-url: ${WECHAT_NOTIFY_URL:}
   # ==================== AI 密钥（环境变量注入，勿硬编码） ====================
   ai:

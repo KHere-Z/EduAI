@@ -52,6 +52,10 @@ public class PaymentProperties {
         private String certSerialNo;
         /** 商户私钥文件路径 */
         private String privateKeyPath;
+        /** 微信支付公钥文件路径（公钥验签模式） */
+        private String publicKeyPath;
+        /** 微信支付公钥 ID（PUB_KEY_ID_xxx） */
+        private String publicKeyId;
         /** 异步通知回调地址 */
         private String notifyUrl;
     }
