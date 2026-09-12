@@ -39,3 +39,10 @@ _guide_*.txt
 # WeChat Pay private key (never commit)
 apiclient_key.pem
 *.pem
+
+# Alipay app keys / certs (never commit — 私钥泄露等同商户被盗刷)
+应用私钥RSA2048*.txt
+应用公钥RSA2048*.txt
+alipayCertPublicKey_RSA2.crt
+alipayRootCert.crt
+appCertPublicKey_*.crt
