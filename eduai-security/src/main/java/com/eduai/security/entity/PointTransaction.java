@@ -46,8 +46,21 @@ public class PointTransaction {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * 软删标记：true=用户已从流水中删除，仅对用户不可见。
+     * <p>
+     * 这张表是支付对账依据，物理删除会让后台再也对不上渠道流水，故用软删——
+     * 行永远保留，只有查询过滤。余额不受删除影响。
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean deleted = false;
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
+        if (this.deleted == null) {
+            this.deleted = false;
+        }
     }
 }

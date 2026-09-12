@@ -4,6 +4,8 @@ import com.eduai.security.vo.MembershipVO;
 import com.eduai.security.vo.PointHistoryPageVO;
 import com.eduai.security.vo.PointVO;
 
+import java.util.List;
+
 /**
  * 智学点服务
  */
@@ -14,6 +16,16 @@ public interface PointService {
 
     /** 点数变动历史（分页） */
     PointHistoryPageVO getHistory(Long userId, int page, int pageSize);
+
+    /**
+     * 批量（软）删除当前用户自己的点数变动记录，返回实际删除行数。
+     * <p>
+     * <b>软删</b>：行保留在库中供后台对账，仅对用户不可见（{@code deleted = true}）。
+     * <p>
+     * <b>不改动余额</b>：删除一条消费记录不会退回智学点，删除一条充值记录也不会扣减，
+     * 否则删记录就等于凭空造点。
+     */
+    int deleteHistory(Long userId, List<Long> ids);
 
     /** 充值（正数增加） */
     void charge(Long userId, int amount, String type, String description);

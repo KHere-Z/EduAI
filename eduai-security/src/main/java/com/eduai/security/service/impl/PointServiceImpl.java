@@ -62,7 +62,7 @@ public class PointServiceImpl implements PointService {
         userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(400, "用户不存在"));
 
-        var pageResult = transactionRepository.findByUserIdOrderByCreatedAtDesc(
+        var pageResult = transactionRepository.findByUserIdAndDeletedFalseOrderByCreatedAtDesc(
                 userId, PageRequest.of(page - 1, pageSize));
 
         List<PointHistoryItemVO> items = pageResult.getContent().stream()
@@ -82,6 +82,33 @@ public class PointServiceImpl implements PointService {
                 .page(page)
                 .pageSize(pageSize)
                 .build();
+    }
+
+    /** 单次请求允许删除的最大行数，防止超大 IN 子句拖垮数据库 */
+    private static final int MAX_DELETE_BATCH = 500;
+
+    @Override
+    @Transactional
+    public int deleteHistory(Long userId, List<Long> ids) {
+        // 空集合直接返回 0：IN () 是非法 SQL；别人的 id 也只会删到 0 行，不必报错
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+        // 去重，避免同一 id 重复出现在 IN 里
+        List<Long> distinct = ids.stream().filter(java.util.Objects::nonNull).distinct().toList();
+        if (distinct.isEmpty()) {
+            return 0;
+        }
+        if (distinct.size() > MAX_DELETE_BATCH) {
+            throw new BusinessException(400, "单次最多删除 " + MAX_DELETE_BATCH + " 条记录");
+        }
+
+        // 归属校验由 user_id 条件保证：只能删当前登录用户自己的流水。
+        // 软删：行保留给后台对账，只对用户不可见；不动余额——删消费记录不退回点数，
+        // 删充值记录也不扣减，否则删记录就等于凭空造点。
+        int deleted = transactionRepository.softDeleteOwnedByIds(userId, distinct);
+        log.info("智学点流水软删: userId={} 请求={} 实际删除={}", userId, distinct.size(), deleted);
+        return deleted;
     }
 
     @Override
