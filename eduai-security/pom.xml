@@ -30,6 +30,13 @@
             <version>0.2.14</version>
         </dependency>
 
+        <!-- 支付宝官方 SDK（电脑网站支付下单签名 + 回调证书验签） -->
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+            <version>4.40.994.ALL</version>
+        </dependency>
+
         <!-- 以下依赖由父 POM 统一管理版本，子模块自动继承：
              spring-boot-starter-web / spring-boot-starter-data-jpa / hutool-all / lombok 等 -->
     </dependencies>

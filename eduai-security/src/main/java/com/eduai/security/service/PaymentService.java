@@ -22,6 +22,13 @@ public interface PaymentService {
     /** 模拟支付成功（仅开发环境，生产应移除） */
     Result<Void> mockPay(Long userId, String orderId);
 
-    /** 处理渠道异步回调，返回给渠道的应答文本（如 "success"） */
-    String handleNotify(String channel, String body, Map<String, String> headers);
+    /**
+     * 处理渠道异步回调，返回给渠道的应答文本（如 "success"）
+     *
+     * @param channel 渠道标识：wechat / alipay
+     * @param params  表单参数（支付宝回调为 application/x-www-form-urlencoded，验签依赖此 Map），微信回调可为空
+     * @param body    原始请求体（微信 APIv3 验签依赖此原文）
+     * @param headers 关键请求头（微信 APIv3 验签依赖）
+     */
+    String handleNotify(String channel, Map<String, String> params, String body, Map<String, String> headers);
 }

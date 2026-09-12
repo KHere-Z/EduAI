@@ -53,16 +53,27 @@ public class PaymentController {
         return paymentService.mockPay(userId, orderId);
     }
 
-    /** 支付宝异步回调（生产环境实现） */
+    /** 支付宝异步回调：application/x-www-form-urlencoded，验签依赖表单参数 */
     @PostMapping("/notify/alipay")
-    public String alipayNotify(@RequestBody String body, HttpServletRequest request) {
-        return paymentService.handleNotify("alipay", body, collectNotifyHeaders(request));
+    public String alipayNotify(HttpServletRequest request) {
+        return paymentService.handleNotify("alipay", collectParams(request), null, Map.of());
     }
 
-    /** 微信支付异步回调（生产环境实现） */
+    /** 微信支付异步回调：APIv3 JSON，验签依赖原始 body + 请求头 */
     @PostMapping("/notify/wechat")
     public String wechatNotify(@RequestBody String body, HttpServletRequest request) {
-        return paymentService.handleNotify("wechat", body, collectNotifyHeaders(request));
+        return paymentService.handleNotify("wechat", Map.of(), body, collectNotifyHeaders(request));
+    }
+
+    /** 把 Servlet 参数表摊平成单值 Map（支付宝回调参数均为单值） */
+    private Map<String, String> collectParams(HttpServletRequest request) {
+        Map<String, String> params = new LinkedHashMap<>();
+        request.getParameterMap().forEach((k, v) -> {
+            if (v != null && v.length > 0) {
+                params.put(k, v[0]);
+            }
+        });
+        return params;
     }
 
     /** 收集回调验签所需的关键请求头（微信 APIv3 回调验签依赖） */

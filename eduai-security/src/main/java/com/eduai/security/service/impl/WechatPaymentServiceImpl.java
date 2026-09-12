@@ -2,6 +2,7 @@ package com.eduai.security.service.impl;
 
 import cn.hutool.core.util.RandomUtil;
 import com.eduai.common.Result;
+import com.eduai.security.config.PaymentPrices;
 import com.eduai.security.config.PaymentProperties;
 import com.eduai.security.entity.PaymentOrder;
 import com.eduai.security.repository.PaymentOrderRepository;
@@ -28,6 +29,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -51,14 +53,6 @@ public class WechatPaymentServiceImpl implements PaymentService {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private static final String NATIVE_URL = "https://api.mch.weixin.qq.com/v3/pay/transactions/native";
-
-    /** 会员方案价格（分） */
-    private static final Map<String, Integer> PRICES = Map.of(
-            "month", 2900,      // 29元
-            "quarter", 7900,    // 79元
-            "halfyear", 13900,  // 139元
-            "year", 19900       // 199元
-    );
 
     /** 懒加载 SDK Config（微信支付公钥模式，下单签名用商户私钥） */
     private volatile Config config;
@@ -113,14 +107,12 @@ public class WechatPaymentServiceImpl implements PaymentService {
         if (plan == null && buyPoints == null) {
             return Result.error("请选择会员方案或输入点数");
         }
-        if (plan != null && !PRICES.containsKey(plan)) {
+        if (plan != null && !PaymentPrices.isPlan(plan)) {
             return Result.error("无效的会员方案: " + plan);
         }
 
         // 金额计算：会员价 + 点数金额（1元=10点，1点=10分）
-        int totalCents = 0;
-        if (plan != null) totalCents += PRICES.get(plan);
-        if (buyPoints != null) totalCents += buyPoints * 10;
+        int totalCents = PaymentPrices.totalCents(plan, buyPoints);
 
         // 生成商户订单号（out_trade_no，≤32字符）
         String orderId = "wx" + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
@@ -197,7 +189,8 @@ public class WechatPaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public String handleNotify(String channel, String body, Map<String, String> headers) {
+    @Transactional
+    public String handleNotify(String channel, Map<String, String> params, String body, Map<String, String> headers) {
         try {
             // 1. 验签 + 解密（依赖回调 HTTP 头）
             NotificationParser parser = new NotificationParser(notificationConfig());
@@ -226,12 +219,14 @@ public class WechatPaymentServiceImpl implements PaymentService {
                 log.error("[微信支付] 订单不存在: orderId={}", orderId);
                 return "FAIL";
             }
-            if ("paid".equals(order.getStatus())) {
-                // 幂等：重复回调直接返回成功，避免重复发点
+
+            // 2. 原子认领：仅 pending → paid 才继续发点，靠 DB 原子性挡住渠道重复回调
+            if (paymentOrderRepository.markPaid(orderId, transactionId) == 0) {
+                log.info("[微信支付] 订单已处理，幂等跳过: orderId={}", orderId);
                 return "SUCCESS";
             }
 
-            // 2. 落库：开会员 + 充智学点
+            // 3. 落库：开会员 + 充智学点
             if (order.getPlan() != null) {
                 pointService.activateMembership(order.getUserId(), order.getPlan());
             }
@@ -239,10 +234,6 @@ public class WechatPaymentServiceImpl implements PaymentService {
                 pointService.charge(order.getUserId(), order.getPoints(), "charge",
                         "充值 " + order.getPoints() + " 智学点");
             }
-
-            order.setStatus("paid");
-            order.setTransactionId(transactionId);
-            paymentOrderRepository.save(order);
 
             log.info("[微信支付] 支付成功落库: orderId={} userId={} plan={} points={}",
                     orderId, order.getUserId(), order.getPlan(), order.getPoints());
