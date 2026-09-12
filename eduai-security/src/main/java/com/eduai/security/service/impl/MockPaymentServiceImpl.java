@@ -1,6 +1,7 @@
 package com.eduai.security.service.impl;
 
 import com.eduai.common.Result;
+import com.eduai.security.config.PaymentPrices;
 import com.eduai.security.service.PaymentService;
 import com.eduai.security.service.PointService;
 import lombok.RequiredArgsConstructor;
@@ -30,14 +31,6 @@ public class MockPaymentServiceImpl implements PaymentService {
     /** Mock 订单存储 */
     private static final ConcurrentHashMap<String, PaymentOrder> ORDERS = new ConcurrentHashMap<>();
 
-    /** 价格映射（分） */
-    private static final Map<String, Integer> PRICES = Map.of(
-            "month",    2900,   // 29元
-            "quarter",  7900,   // 79元
-            "halfyear", 13900,  // 139元
-            "year",     19900   // 199元
-    );
-
     @Override
     public Result<Map<String, Object>> createOrder(Long userId, Map<String, Object> body) {
         String plan = body.get("plan") != null ? body.get("plan").toString() : null;
@@ -47,14 +40,12 @@ public class MockPaymentServiceImpl implements PaymentService {
         if (plan == null && buyPoints == null) {
             return Result.error("请选择会员方案或输入点数");
         }
-        if (plan != null && !PRICES.containsKey(plan)) {
+        if (plan != null && !PaymentPrices.isPlan(plan)) {
             return Result.error("无效的会员方案: " + plan);
         }
 
         // 价格计算：会员价 + 点数金额（1元=10点，1点=10分）
-        int totalCents = 0;
-        if (plan != null) totalCents += PRICES.get(plan);
-        if (buyPoints != null) totalCents += buyPoints * 10;  // 1点=10分
+        int totalCents = PaymentPrices.totalCents(plan, buyPoints);
 
         String orderId = UUID.randomUUID().toString().substring(0, 8);
         ORDERS.put(orderId, new PaymentOrder(orderId, userId, plan,
@@ -123,8 +114,8 @@ public class MockPaymentServiceImpl implements PaymentService {
     }
 
     @Override
-    public String handleNotify(String channel, String body, Map<String, String> headers) {
-        log.info("[支付回调-{}] body={}", channel, body);
+    public String handleNotify(String channel, Map<String, String> params, String body, Map<String, String> headers) {
+        log.info("[支付回调-{}] params={} body={}", channel, params, body);
         return "success";
     }
 

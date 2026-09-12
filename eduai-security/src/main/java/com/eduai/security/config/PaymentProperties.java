@@ -30,14 +30,26 @@ public class PaymentProperties {
     public static class Alipay {
         /** 应用 ID */
         private String appId;
-        /** 应用私钥（PKCS8） */
+        /** 应用私钥（PKCS8，单行/直接内联；多行 PEM 建议用 privateKeyPath） */
         private String privateKey;
-        /** 支付宝公钥 */
+        /** 应用私钥文件路径（推荐：多行 PEM 放文件，避免环境变量换行被截断） */
+        private String privateKeyPath;
+        /** 支付宝公钥（公钥字符串模式；证书模式下用 alipayPublicCertPath） */
         private String alipayPublicKey;
+        /** 应用公钥证书路径（appCertPublicKey_xxx.crt，证书模式） */
+        private String certPath;
+        /** 支付宝公钥证书路径（alipayCertPublicKey_RSA2.crt，证书模式） */
+        private String alipayPublicCertPath;
+        /** 支付宝根证书路径（alipayRootCert.crt，证书模式） */
+        private String rootCertPath;
+        /** 签名算法：RSA2（默认）/ RSA */
+        private String signType = "RSA2";
         /** 网关地址 */
         private String gateway = "https://openapi.alipay.com/gateway.do";
         /** 异步通知回调地址 */
         private String notifyUrl;
+        /** 同步跳转地址（付款完成后浏览器回跳的前端页面） */
+        private String returnUrl;
     }
 
     @Data

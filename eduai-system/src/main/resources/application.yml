@@ -130,9 +130,16 @@ eduai:
     alipay:
       app-id: ${ALIPAY_APP_ID:}
       private-key: ${ALIPAY_PRIVATE_KEY:}
+      private-key-path: ${ALIPAY_PRIVATE_KEY_PATH:}
       alipay-public-key: ${ALIPAY_PUBLIC_KEY:}
+      # 证书模式（推荐）：三个证书文件路径 + 应用私钥，走 rsaCertCheckV1 验签
+      cert-path: ${ALIPAY_CERT_PATH:}
+      alipay-public-cert-path: ${ALIPAY_PUBLIC_CERT_PATH:}
+      root-cert-path: ${ALIPAY_ROOT_CERT_PATH:}
+      sign-type: ${ALIPAY_SIGN_TYPE:RSA2}
       gateway: https://openapi.alipay.com/gateway.do
       notify-url: ${ALIPAY_NOTIFY_URL:}
+      return-url: ${ALIPAY_RETURN_URL:}
     wechat:
       app-id: ${WECHAT_APP_ID:}
       mch-id: ${WECHAT_MCH_ID:}
