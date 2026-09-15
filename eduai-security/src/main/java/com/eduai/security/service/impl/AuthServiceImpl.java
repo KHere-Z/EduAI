@@ -133,12 +133,21 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException("用户名已存在");
         }
 
+        // 角色白名单：自助注册只允许 老师(3) / 学生(4)。
+        // RoleEnum 不含管理员(1)，故此处天然拒绝越权注册管理员。
+        RoleEnum roleEnum;
+        try {
+            roleEnum = RoleEnum.fromDbValue(dto.getRoleType());
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException("无效的角色类型: " + dto.getRoleType());
+        }
+
         User user = User.builder()
                 .uid(generateUid())
                 .username(dto.getUsername())
                 .password(PasswordUtil.encode(dto.getPassword()))
                 .realName(dto.getRealName())
-                .roleType(dto.getRoleType())
+                .roleType(roleEnum.getDbValue())
                 .status(1)
                 .build();
 
@@ -151,7 +160,7 @@ public class AuthServiceImpl implements AuthService {
         // 新用户注册奖励 25 智学点
         pointService.charge(user.getId(), 25, "gift", "新用户注册奖励 25 点");
 
-        if (dto.getRoleType() == 3 && dto.getSubjectIds() != null && !dto.getSubjectIds().isBlank()) {
+        if (roleEnum == RoleEnum.TEACHER && dto.getSubjectIds() != null && !dto.getSubjectIds().isBlank()) {
             Teacher teacher = Teacher.builder()
                     .userId(user.getId())
                     .subjectIds(dto.getSubjectIds())
@@ -352,8 +361,8 @@ public class AuthServiceImpl implements AuthService {
         redisTemplate.opsForValue().set(
                 limitKey, "1", Duration.ofSeconds(RedisKeys.SMS_LIMIT_TTL));
 
-        // 5. 发送短信
-        smsService.sendVerifyCode(phone, code);
+        // 5. 发送短信（有效分钟数取自 Redis TTL，避免短信文案与实际有效期漂移）
+        smsService.sendVerifyCode(phone, code, (int) (RedisKeys.SMS_CODE_TTL / 60));
     }
 
     @Override
@@ -411,94 +420,36 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginVO wechatLogin(WechatLoginRequest req) {
-        if (req.getUnionid() == null || req.getUnionid().isBlank()) {
-            throw new BusinessException(400, "微信 unionid 不能为空");
-        }
-
-        // 查找 unionid 绑定
-        Optional<User> boundUser = wechatBindingService.findUserByUnionid(req.getUnionid());
-
-        if (boundUser.isPresent()) {
-            // 情况A：已绑定 → 直接登录
-            User user = boundUser.get();
-            if (user.getStatus() != 1) {
-                throw new BusinessException("账号已被禁用");
-            }
-            doLogin(user);
-            return LoginVO.builder()
-                    .user(toUserVO(user))
-                    .token(StpUtil.getTokenValue())
-                    .build();
-        }
-
-        // 情况B：未绑定 → 返回需要绑定手机号标记
-        return LoginVO.builder()
-                .needBindPhone(true)
-                .unionid(req.getUnionid())
-                .build();
+        // ⚠️ 已停用（fail-closed）。原实现直接信任客户端传来的 unionid
+        // （WechatLoginRequest.unionid），任何人构造一个 unionid 即可登录对应账号。
+        // 当前 user_wechat 为空，暂无可利用面；但一旦微信登录真正上线，即为账号接管。
+        //
+        // 重新开放前必须完成（见 Phase 0 第 2 条）：
+        //   1. 客户端只传微信授权 code，openid/unionid 由服务端调
+        //      /sns/oauth2/access_token（网站应用）或 /sns/jscode2session（小程序）换取；
+        //   2. 换取结果存 Redis 一次性 ticket（TTL 5-10min），LoginVO 只回 ticket 不回 unionid；
+        //   3. bindPhone 凭 ticket 取身份，客户端全程不得接触 unionid。
+        throw new BusinessException(
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getCode(),
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getMessage());
     }
 
     @Override
     @Transactional
     public LoginVO bindPhone(BindPhoneRequest req) {
-        // 1. 验证码校验
-        String codeKey = RedisKeys.smsCodeKey(req.getPhone());
-        String storedCode = redisTemplate.opsForValue().get(codeKey);
-        if (storedCode == null || !storedCode.equals(req.getCode())) {
-            throw new BusinessException(
-                    AuthErrorCode.SMS_CODE_INVALID.getCode(),
-                    AuthErrorCode.SMS_CODE_INVALID.getMessage());
-        }
-        redisTemplate.delete(codeKey);
-
-        // 2. 绑定唯一性校验（由 WechatBindingService 执行）
-        User user = userRepository.findByPhone(req.getPhone()).orElse(null);
-
-        if (user != null) {
-            // 手机号已有账号 → 校验绑定冲突后绑定微信
-            wechatBindingService.bindWechatToPhone(
-                    req.getPhone(), req.getUnionid(), req.getOpenid(), null, null);
-
-            if (user.getStatus() != 1) {
-                throw new BusinessException("账号已被禁用");
-            }
-            doLogin(user);
-            return LoginVO.builder()
-                    .user(toUserVO(user))
-                    .token(StpUtil.getTokenValue())
-                    .build();
-        }
-
-        // 新手机号 → 创建用户 + 绑定微信（需先校验唯一性）
-        if (req.getRole() == null || req.getRole().isBlank()) {
-            throw new BusinessException(
-                    AuthErrorCode.ROLE_REQUIRED.getCode(),
-                    AuthErrorCode.ROLE_REQUIRED.getMessage());
-        }
-
-        // 唯一性校验：新手机号也不会被其他微信绑定（双重保险）
-        if (wechatRepository.existsByUnionid(req.getUnionid())) {
-            throw new BusinessException(
-                    AuthErrorCode.WECHAT_ALREADY_BOUND.getCode(),
-                    AuthErrorCode.WECHAT_ALREADY_BOUND.getMessage());
-        }
-
-        user = createUserByRole(req.getPhone(), req.getRole(),
-                req.getTeacherInfo(), req.getStudentInfo());
-
-        // 创建微信绑定
-        UserWechat binding = UserWechat.builder()
-                .userUid(user.getUid())
-                .openid(req.getOpenid())
-                .unionid(req.getUnionid())
-                .build();
-        wechatRepository.save(binding);
-
-        doLogin(user);
-        return LoginVO.builder()
-                .user(toUserVO(user))
-                .token(StpUtil.getTokenValue())
-                .build();
+        // ⚠️ 已停用（fail-closed）。原实现从入参取 unionid/openid 并直接落库绑定，
+        // 而这两个值来自客户端、无法验证真伪 → 可被用来抢注他人的微信 unionid。
+        //
+        // 重新开放时必须重建为（见 Phase 0 第 2 条）：
+        //   1. 入参不再含 unionid/openid，只收一次性 bindTicket；
+        //   2. 校验手机号短信验证码（原逻辑，一次性消费 Redis key）；
+        //   3. 凭 ticket 从 Redis 取回服务端换来的 openid/unionid（取后即删）；
+        //   4. 手机号已有账号 → 校验双向唯一性后绑定到该账号并登录（不新建）；
+        //      手机号无账号 → createUserByRole 建号 + 建绑定；
+        //   5. 绑定唯一性仍复用 WechatBindingService.validateBindingUniqueness。
+        throw new BusinessException(
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getCode(),
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getMessage());
     }
 
     // ==================== 已登录用户微信管理 ====================
@@ -506,13 +457,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public void bindWechat(Long userId, BindWechatRequest req) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(
-                        AuthErrorCode.USER_NOT_FOUND.getCode(),
-                        AuthErrorCode.USER_NOT_FOUND.getMessage()));
-        wechatBindingService.bindWechatToCurrentUser(
-                user.getUid(), req.getOpenid(), req.getUnionid(),
-                req.getNickname(), req.getAvatar());
+        // ⚠️ 已停用（fail-closed）：同 bindPhone，入参 openid/unionid 不可信。
+        // 重新开放时改为收一次性 bindTicket，凭 ticket 取回服务端换来的身份。
+        throw new BusinessException(
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getCode(),
+                AuthErrorCode.WECHAT_LOGIN_DISABLED.getMessage());
     }
 
     @Override

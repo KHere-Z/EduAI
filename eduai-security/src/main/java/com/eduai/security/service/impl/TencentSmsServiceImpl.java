@@ -71,8 +71,8 @@ public class TencentSmsServiceImpl implements SmsService {
     // ==================== 公共接口 ====================
 
     @Override
-    public void sendVerifyCode(String phone, String code) {
-        String payload = buildPayload(phone, code);
+    public void sendVerifyCode(String phone, String code, int validMinutes) {
+        String payload = buildPayload(phone, code, validMinutes);
         String timestamp = String.valueOf(ZonedDateTime.now(ZoneOffset.UTC).toEpochSecond());
         String authorization = sign(payload, timestamp);
 
@@ -81,13 +81,16 @@ public class TencentSmsServiceImpl implements SmsService {
 
     // ==================== 请求体 ====================
 
-    private String buildPayload(String phone, String code) {
+    private String buildPayload(String phone, String code, int validMinutes) {
         JSONObject body = new JSONObject();
         body.set("PhoneNumberSet",    new String[]{"+86" + phone});
         body.set("SmsSdkAppId",       smsConfig.getSdkAppId());
         body.set("SignName",          smsConfig.getSignName());
         body.set("TemplateId",        smsConfig.getTemplateId());
-        body.set("TemplateParamSet",  new String[]{code});
+        // TemplateParamSet 必须与模板占位符一一对应，顺序即 {1}{2}…
+        // 本模板 "…{1}为您的登录/注册验证码，请于{2}分钟内填写…" 要求两个参数。
+        // 数量不匹配腾讯云会直接拒绝下发（InvalidParameterValue.TemplateParameterLengthMismatch）。
+        body.set("TemplateParamSet",  new String[]{code, String.valueOf(validMinutes)});
         return body.toString();
     }
 

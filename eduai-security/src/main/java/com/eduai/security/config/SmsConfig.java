@@ -23,8 +23,8 @@ public class SmsConfig {
     /** 短信应用ID */
     private String sdkAppId;
 
-    /** 短信签名 */
-    private String signName = "EduAI";
+    /** 短信签名内容（权威值在 application.yml 的 sms.tencent.sign-name，此处仅兜底） */
+    private String signName = "苏州钦学鑫宸教育";
 
     /** 短信模板ID */
     private String templateId;
