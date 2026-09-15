@@ -171,7 +171,8 @@ sms:
     secret-id: ${SMS_SECRET_ID:}
     secret-key: ${SMS_SECRET_KEY:}
     sdk-app-id: ${SMS_APP_ID:}
-    sign-name: EduAI
+    # 短信签名内容（不是签名ID！腾讯云 SignName 要填已审核通过的签名文字）
+    sign-name: ${SMS_SIGN_NAME:苏州钦学鑫宸教育}
     template-id: ${SMS_TEMPLATE_ID:}
 
 # 日志（生产默认 info；开发由 application-dev.yml 覆盖为 debug）

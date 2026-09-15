@@ -16,10 +16,11 @@ import org.springframework.stereotype.Service;
 public class MockSmsServiceImpl implements SmsService {
 
     @Override
-    public void sendVerifyCode(String phone, String code) {
+    public void sendVerifyCode(String phone, String code, int validMinutes) {
         log.info("============================================");
         log.info("  [Mock短信] 手机号: {}", phone);
         log.info("  [Mock短信] 验证码: {}", code);
+        log.info("  [Mock短信] 有效期: {} 分钟", validMinutes);
         log.info("  [Mock短信] 请使用上方验证码完成登录");
         log.info("============================================");
     }

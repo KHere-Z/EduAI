@@ -91,6 +91,7 @@ public class AuthController {
 
     /** 微信登录（无需登录；未绑定返回 needBindPhone=true） */
     @PostMapping("/wechat-login")
+    @RateLimit(limit = 20, windowSec = 60, message = "登录尝试过于频繁，请稍后再试")
     public Result<LoginVO> wechatLogin(@RequestBody WechatLoginRequest req) {
         return Result.ok(authService.wechatLogin(req));
     }

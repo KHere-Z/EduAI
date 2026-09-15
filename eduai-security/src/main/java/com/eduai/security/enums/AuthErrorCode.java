@@ -35,7 +35,10 @@ public enum AuthErrorCode {
     WECHAT_NOT_BOUND(40008, "微信未绑定账号，请先绑定手机号"),
 
     /** 新用户注册需选择角色 */
-    ROLE_REQUIRED(40009, "新用户注册需选择角色");
+    ROLE_REQUIRED(40009, "新用户注册需选择角色"),
+
+    /** 微信登录暂未开放（开放平台凭证未配置 / 服务端换取流程未实现） */
+    WECHAT_LOGIN_DISABLED(40010, "微信登录暂未开放，请使用手机号登录");
 
     private final int code;
     private final String message;

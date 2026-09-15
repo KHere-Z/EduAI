@@ -63,8 +63,8 @@ public class User {
     @Column(name = "teacher_uid")
     private Long teacherUid;
 
-    /** 手机号 */
-    @Column(length = 20)
+    /** 手机号（唯一：手机号即账号，findByPhone 依赖单值；NULL 可重复） */
+    @Column(length = 20, unique = true)
     private String phone;
 
     /** 邮箱 */

@@ -26,15 +26,16 @@ public class UserWechat {
     private Long id;
 
     /** 用户UID → users.uid */
-    @Column(name = "user_uid", nullable = false)
+    /** 用户UID → users.uid（唯一：一个账号只允许一条微信绑定） */
+    @Column(name = "user_uid", nullable = false, unique = true)
     private Long userUid;
 
     /** 微信 openid */
     @Column(nullable = false, length = 100)
     private String openid;
 
-    /** 微信 unionid（唯一索引） */
-    @Column(length = 100)
+    /** 微信 unionid（唯一索引；DB 侧由 migrate-auth-upgrade.sql 的 idx_unionid 保证） */
+    @Column(length = 100, unique = true)
     private String unionid;
 
     /** 微信昵称 */
