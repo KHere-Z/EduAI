@@ -43,6 +43,26 @@ public class PointServiceImpl implements PointService {
             "year",     new PlanConfig("年卡", 800)
     );
 
+    /**
+     * 注册赠送的体验会员方案代码。
+     * <p>
+     * ⚠️ 刻意**不放进上面的 PLANS**：PLANS 同时是 {@link #activateMembership} 的方案白名单，
+     * 一旦放进去，任何能触达 activateMembership 的路径都能用 "trial" 白拿一个月。
+     * 试用期本就不可购买，展示名改由 {@link #planConfigOf} 单独解析。
+     */
+    private static final String TRIAL_PLAN = "trial";
+
+    /** 体验会员的展示名（{@code MembershipVO.plan} 对外返回的是这个，不是方案代码） */
+    private static final String TRIAL_PLAN_NAME = "体验会员";
+
+    /** 方案展示信息（含不可购买的 trial） */
+    private static PlanConfig planConfigOf(String plan) {
+        if (TRIAL_PLAN.equals(plan)) {
+            return new PlanConfig(TRIAL_PLAN_NAME, 0);
+        }
+        return PLANS.getOrDefault(plan, new PlanConfig("未知", 0));
+    }
+
     // AI 消耗点数
     public static final int COST_AI_CHAT = 3;
     public static final int COST_AI_WRONG_ANALYSIS = 3;
@@ -139,7 +159,7 @@ public class PointServiceImpl implements PointService {
         }
 
         Membership m = opt.get();
-        PlanConfig config = PLANS.getOrDefault(m.getPlan(), new PlanConfig("未知", 0));
+        PlanConfig config = planConfigOf(m.getPlan());
 
         boolean isActive = m.getExpiresAt() != null
                 && m.getExpiresAt().isAfter(LocalDateTime.now())
@@ -194,6 +214,39 @@ public class PointServiceImpl implements PointService {
         charge(userId, config.giftPoints, "gift", "开通" + config.name + "赠送 " + config.giftPoints + " 点");
 
         log.info("会员开通: userId={} plan={} giftPoints={}", userId, plan, config.giftPoints);
+    }
+
+    @Override
+    @Transactional
+    public void grantTrialMembership(Long userId, int days) {
+        if (days <= 0) {
+            throw new BusinessException(400, "体验天数必须大于 0");
+        }
+        LocalDateTime now = LocalDateTime.now();
+
+        // membership.user_id 上有唯一约束，故必须「有则顺延、无则插入」，不能无脑 insert
+        Membership m = membershipRepository.findByUserId(userId).orElse(null);
+
+        if (m != null && "active".equals(m.getStatus())
+                && m.getExpiresAt() != null && m.getExpiresAt().isAfter(now)) {
+            // 已有有效会员（如先付费后补发）→ 只顺延到期时间，不覆盖原方案
+            m.setExpiresAt(m.getExpiresAt().plusDays(days));
+            m.setUpdatedAt(now);
+            membershipRepository.save(m);
+        } else {
+            // 无会员，或原记录已过期 → 新建（过期记录的 status 可能仍是 active，此处一并覆盖）
+            m = Membership.builder()
+                    .userId(userId)
+                    .plan(TRIAL_PLAN)
+                    .startedAt(now)
+                    .expiresAt(now.plusDays(days))
+                    .status("active")
+                    .build();
+            membershipRepository.save(m);
+        }
+
+        // 刻意不 charge 点数：注册赠送的点数是一笔独立流水，由调用方另行发放
+        log.info("体验会员发放: userId={} days={} expiresAt={}", userId, days, m.getExpiresAt());
     }
 
     /** 获取会员折扣（非会员返回 1.0） */

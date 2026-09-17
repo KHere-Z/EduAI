@@ -170,8 +170,10 @@ public class AuthServiceImpl implements AuthService {
 
         userRepository.save(user);
 
-        // 新用户注册奖励 25 智学点
-        pointService.charge(user.getId(), 25, "gift", "新用户注册奖励 25 点");
+        // 新用户注册欢迎礼包：49 智学点 + 7 天体验会员
+        pointService.charge(user.getId(), 49, "gift", "新用户注册奖励 49 点");
+        // 体验会员本身不赠点，点数由上面那笔单独发放（grantTrialMembership 内部刻意不 charge）
+        pointService.grantTrialMembership(user.getId(), 7);
 
         if (roleEnum == RoleEnum.TEACHER && dto.getSubjectIds() != null && !dto.getSubjectIds().isBlank()) {
             Teacher teacher = Teacher.builder()
@@ -554,8 +556,10 @@ public class AuthServiceImpl implements AuthService {
 
         user = userRepository.save(user);
 
-        // 新用户注册奖励 25 智学点
-        pointService.charge(user.getId(), 25, "gift", "新用户注册奖励 25 点");
+        // 新用户注册欢迎礼包：49 智学点 + 7 天体验会员（与 register 保持同一口径）
+        // 注：本方法当前无调用点，为微信绑定重建保留（见方法头注释）
+        pointService.charge(user.getId(), 49, "gift", "新用户注册奖励 49 点");
+        pointService.grantTrialMembership(user.getId(), 7);
 
         // 教师自注册：自动创建 teachers 记录
         if (roleEnum == RoleEnum.TEACHER) {

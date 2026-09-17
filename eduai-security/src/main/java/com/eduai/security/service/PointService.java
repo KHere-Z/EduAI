@@ -26,4 +26,13 @@ public interface PointService {
 
     /** 开通/续费会员 */
     void activateMembership(Long userId, String plan);
+
+    /**
+     * 发放体验会员（注册赠送用），{@code days} 天后到期。
+     * <p>
+     * 与 {@link #activateMembership} 的区别：按**天**计算（后者只支持按月）、
+     * **不赠送点数**（注册送的点数由调用方另行 charge）、方案代码为不可购买的 {@code trial}。
+     * 已有有效会员时顺延到期时间，不覆盖原方案。
+     */
+    void grantTrialMembership(Long userId, int days);
 }
