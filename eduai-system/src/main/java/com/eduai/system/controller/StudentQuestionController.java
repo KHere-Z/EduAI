@@ -1,6 +1,7 @@
 package com.eduai.system.controller;
 
 import com.eduai.common.Result;
+import com.eduai.common.annotation.RequireMembership;
 import com.eduai.system.service.QuestionBankService;
 import com.eduai.system.vo.GradeResultVO;
 import com.eduai.system.vo.QuestionPageVO;
@@ -64,11 +65,12 @@ public class StudentQuestionController {
     }
 
     /**
-     * 学生更新掌握度和完成状态（仅 mastery + completed）
+     * 学生更新掌握度和完成状态（仅 mastery + completed）—— 会员专享
      * <p>
      * PUT /api/v1/student/questions/{id}/mastery
      */
     @PutMapping("/{id}/mastery")
+    @RequireMembership
     public Result<Void> updateMastery(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         log.info("PUT /api/v1/student/questions/{}/mastery body={}", id, body);
         questionBankService.updateMastery(id, body);
@@ -76,12 +78,13 @@ public class StudentQuestionController {
     }
 
     /**
-     * 题目 AI 批改（扣 5 智学点）
+     * 题目 AI 批改（扣 5 智学点）—— 会员专享
      * <p>
      * POST /api/v1/student/questions/{questionId}/grade
      * multipart: file=答题图片（必填）, answerText=作答文字（可选）
      */
     @PostMapping("/{questionId}/grade")
+    @RequireMembership
     public Result<GradeResultVO> grade(@PathVariable Long questionId,
                                        @RequestParam("file") MultipartFile file,
                                        @RequestParam(required = false) String answerText) {
@@ -91,12 +94,13 @@ public class StudentQuestionController {
     }
 
     /**
-     * 保存答案（只保存、不批改、不扣点）
+     * 保存答案（只保存、不批改、不扣点）—— 会员专享
      * <p>
      * POST /api/v1/student/questions/{questionId}/answer
      * multipart: file=答题图片（必填）, answerText=作答文字（可选）
      */
     @PostMapping("/{questionId}/answer")
+    @RequireMembership
     public Result<SaveAnswerVO> saveAnswer(@PathVariable Long questionId,
                                            @RequestParam("file") MultipartFile file,
                                            @RequestParam(required = false) String answerText) {

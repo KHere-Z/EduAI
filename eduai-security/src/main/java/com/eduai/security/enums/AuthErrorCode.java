@@ -38,7 +38,13 @@ public enum AuthErrorCode {
     ROLE_REQUIRED(40009, "新用户注册需选择角色"),
 
     /** 微信登录暂未开放（开放平台凭证未配置 / 服务端换取流程未实现） */
-    WECHAT_LOGIN_DISABLED(40010, "微信登录暂未开放，请使用手机号登录");
+    WECHAT_LOGIN_DISABLED(40010, "微信登录暂未开放，请使用手机号登录"),
+
+    /** 会员专享功能（前端可据此引导跳转充值页） */
+    MEMBERSHIP_REQUIRED(40011, "该功能为会员专享"),
+
+    /** 手机号未注册（前端可据此引导跳转注册页并回填手机号） */
+    PHONE_NOT_REGISTERED(40012, "该手机号未注册，请先注册");
 
     private final int code;
     private final String message;
