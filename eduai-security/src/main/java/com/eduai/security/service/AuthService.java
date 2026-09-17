@@ -35,7 +35,7 @@ public interface AuthService {
     /** 发送短信验证码 */
     void sendSms(String phone);
 
-    /** 短信验证码登录/注册 */
+    /** 短信验证码登录（仅限已注册手机号；未注册抛 PHONE_NOT_REGISTERED，不自动建号） */
     LoginVO loginBySms(LoginBySmsRequest request);
 
     // ==================== 微信登录 ====================
