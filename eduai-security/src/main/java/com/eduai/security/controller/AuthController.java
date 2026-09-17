@@ -80,7 +80,7 @@ public class AuthController {
         return Result.ok();
     }
 
-    /** 短信验证码登录/注册（无需登录） */
+    /** 短信验证码登录（无需登录；仅限已注册手机号，未注册返回 40012 引导去注册） */
     @PostMapping("/login-sms")
     @RateLimit(limit = 20, windowSec = 60, message = "登录尝试过于频繁，请稍后再试")
     public Result<LoginVO> loginBySms(@Valid @RequestBody LoginBySmsRequest req) {

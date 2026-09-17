@@ -75,7 +75,20 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public LoginVO login(LoginDTO dto) {
-        User user = userRepository.findByUsername(dto.getUsername())
+        // 登录标识：先按用户名匹配，未命中再按手机号匹配。
+        // 前端是同一个输入框（提示「用户名 / 手机号」，字段名仍为 username），
+        // 所以后端只需把匹配条件从「只按用户名」放宽为「用户名或手机号」，请求体不变。
+        //
+        // 这里用两步 or() 而非 findByUsernameOrPhone 单条 OR 查询，是因为：
+        // 若某用户的 username 恰好长得像手机号、而另一个用户的 phone 正是这个号，
+        // OR 查询会命中两行，Spring Data 的 Optional 签名会抛
+        // IncorrectResultSizeDataAccessException → 前端拿到 500。
+        // 两步走天然有优先级（用户名优先），且任何情况下都只取一行。
+        String identifier = dto.getUsername();
+        User user = userRepository.findByUsername(identifier)
+                // 手机号入库前经 PHONE_REGEX(^1[3-9]\d{9}$) 校验后原样存储，
+                // 即 11 位纯数字、不带 +86；用户手输可能带空格，故这条路径做 trim
+                .or(() -> userRepository.findByPhone(identifier.trim()))
                 .orElseThrow(() -> new BusinessException("用户名或密码错误"));
 
         if (user.getStatus() != 1) {
@@ -375,7 +388,16 @@ public class AuthServiceImpl implements AuthService {
                     AuthErrorCode.PHONE_FORMAT_INVALID.getMessage());
         }
 
-        // 2. 验证码校验（一次性使用）
+        // 2. 验证码校验 —— 此处**只校验、不消费**，删除挪到第 4 步手机号确认已注册之后。
+        //    原因：未注册手机号会返回 40012，前端据此引导到 /auth/register；
+        //    而 register 校验的是同一个 Redis key（sms:code:{phone}）。若在这里就删掉，
+        //    用户到了注册页手里的码已失效，只能重新发码，而重发会撞上 sendSms 的
+        //    60 秒频控（SMS_LIMIT_TTL）→ 用户被迫干等。保留后注册页可**直接复用**这条码
+        //    （TTL 300s 内有效），既省一次等待，也省一条短信。
+        //
+        //    ⚠️ 顺序约束，不要改动：验证码校验必须留在 findByPhone **之前**。
+        //    一旦把手机号查询提前，攻击者就能用任意垃圾验证码打本接口，靠
+        //    40003（码错）与 40012（号未注册）的差异免费枚举已注册手机号。
         String codeKey = RedisKeys.smsCodeKey(req.getPhone());
         String storedCode = redisTemplate.opsForValue().get(codeKey);
         if (storedCode == null || !storedCode.equals(req.getCode())) {
@@ -383,32 +405,29 @@ public class AuthServiceImpl implements AuthService {
                     AuthErrorCode.SMS_CODE_INVALID.getCode(),
                     AuthErrorCode.SMS_CODE_INVALID.getMessage());
         }
-        redisTemplate.delete(codeKey); // 验证成功立即删除
 
-        // 3. 查找用户
-        User user = userRepository.findByPhone(req.getPhone()).orElse(null);
+        // 3. 查找用户 —— 未注册直接拒绝，不再自动建号。
+        //    口径：短信验证码只用于「已注册用户」登录；新用户必须先走 /auth/register，
+        //    在那里完成角色选择、用户名/密码设置与手机号唯一性校验。
+        //    移除自动建号的两个理由：
+        //      1. 它绕过了 register 的完整校验，等于开了一条无密码建号通道
+        //         （建出来的号 username / password 均为 null）；
+        //      2. findByPhone + insert 是「先查后插」的 TOCTOU，并发下可造出同号多账号，
+        //         之后该号 findByPhone 会直接抛 IncorrectResultSizeDataAccessException。
+        //
+        //    注意：本步失败（抛 40012）时**刻意不消费验证码**，留给 /auth/register 复用，
+        //    这是上面「只校验不消费」的目的所在。
+        User user = userRepository.findByPhone(req.getPhone())
+                .orElseThrow(() -> new BusinessException(
+                        AuthErrorCode.PHONE_NOT_REGISTERED.getCode(),
+                        AuthErrorCode.PHONE_NOT_REGISTERED.getMessage()));
 
-        if (user != null) {
-            // 老用户 → 直接登录
-            if (user.getStatus() != 1) {
-                throw new BusinessException("账号已被禁用");
-            }
-            doLogin(user);
-            return LoginVO.builder()
-                    .user(toUserVO(user))
-                    .token(StpUtil.getTokenValue())
-                    .build();
+        // 4. 手机号已注册 → 验证码正式消费（一次性），校验状态后登录
+        redisTemplate.delete(codeKey);
+
+        if (user.getStatus() != 1) {
+            throw new BusinessException("账号已被禁用");
         }
-
-        // 4. 新用户 → 必须携带角色信息完成注册
-        if (req.getRole() == null || req.getRole().isBlank()) {
-            throw new BusinessException(
-                    AuthErrorCode.ROLE_REQUIRED.getCode(),
-                    AuthErrorCode.ROLE_REQUIRED.getMessage());
-        }
-
-        user = createUserByRole(req.getPhone(), req.getRole(),
-                req.getTeacherInfo(), req.getStudentInfo());
         doLogin(user);
         return LoginVO.builder()
                 .user(toUserVO(user))
@@ -495,7 +514,15 @@ public class AuthServiceImpl implements AuthService {
         userRepository.save(user);
     }
 
-    /** 根据角色创建用户 */
+    /**
+     * 根据角色创建用户（手机号无账号时的建号逻辑）。
+     * <p>
+     * ⚠️ 当前**无任何调用点**：原先唯一的调用方 {@code loginBySms} 的自动建号分支已移除
+     * （改为未注册直接返回 40012）。保留本方法是为微信绑定重建做准备 ——
+     * 见 {@link #bindPhone} 注释第 4 条「手机号无账号 → createUserByRole 建号 + 建绑定」。
+     * 若微信绑定最终不走这条路径，可连同 {@code TeacherRegisterInfo} /
+     * {@code StudentRegisterInfo} 一并删除。
+     */
     private User createUserByRole(String phone, String role,
                                    TeacherRegisterInfo teacherInfo,
                                    StudentRegisterInfo studentInfo) {

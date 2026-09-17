@@ -6,10 +6,14 @@ import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
 /**
- * 短信验证码登录/注册请求
+ * 短信验证码登录请求
  * <p>
- * 新用户（手机号不存在）必须携带 role + 对应角色资料；
- * 老用户仅需 phone + code。
+ * 后端只读 {@code phone} + {@code code}：手机号未注册时返回 40012，不再自动建号。
+ * <p>
+ * 下面 role / teacherInfo / studentInfo 三个字段**当前已不被后端使用**，
+ * 保留仅为兼容仍在发送它们的旧前端（Jackson 会忽略未知字段，删掉也不会报错）。
+ * 真正需要移除它们的前提是：微信绑定重建时（见 AuthServiceImpl#bindPhone 注释）
+ * 不再复用本 DTO。在那之前先留着，避免同时改两处契约。
  */
 @Data
 public class LoginBySmsRequest {
@@ -21,14 +25,17 @@ public class LoginBySmsRequest {
     @NotBlank(message = "验证码不能为空")
     private String code;
 
-    /** 角色类型：teacher / student（新用户必填，老用户忽略） */
+    /** 【已不使用】原：新用户自动建号时的角色 */
+    @Deprecated
     private String role;
 
-    /** 教师注册信息（role=teacher 时使用） */
+    /** 【已不使用】原：新用户自动建号时的教师资料 */
+    @Deprecated
     @Valid
     private TeacherRegisterInfo teacherInfo;
 
-    /** 学生注册信息（role=student 时使用） */
+    /** 【已不使用】原：新用户自动建号时的学生资料 */
+    @Deprecated
     @Valid
     private StudentRegisterInfo studentInfo;
 }
