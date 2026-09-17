@@ -28,8 +28,12 @@ public class GlobalExceptionHandler {
     /** 业务异常 */
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<Result<Void>> handleBusinessException(BusinessException e) {
-        log.warn("业务异常: {}", e.getMessage());
-        return ResponseEntity.status(e.getCode()).body(Result.fail(e.getCode(), e.getMessage()));
+        log.warn("业务异常: code={}, msg={}", e.getCode(), e.getMessage());
+        // 注意：e.getCode() 是内部业务码（如 40005），不是 HTTP 状态码，只能放进 body。
+        // 曾经写成 ResponseEntity.status(e.getCode())，HTTP 状态位会抛
+        // IllegalArgumentException: Status code '40005' should be a three-digit positive integer，
+        // 异常处理器自身崩掉 → Spring 回落默认 /error → 前端只拿到裸 500，读不到 message。
+        return ResponseEntity.badRequest().body(Result.fail(e.getCode(), e.getMessage()));
     }
 
     /** 参数校验失败 */
