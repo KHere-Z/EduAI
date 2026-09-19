@@ -30,6 +30,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -70,6 +71,22 @@ public class AuthServiceImpl implements AuthService {
     private String uploadDir;
 
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    /**
+     * 验证码「比对成功才删除」的原子脚本：匹配返回 1，否则返回 0（不删）。
+     * <p>
+     * 为什么必须原子：写成 {@code get()} 再 {@code delete()} 两步的话，两者之间没有原子性，
+     * 同码并发的两个注册请求会**都**读到码、都通过校验 → 可能建出两个同手机号账号
+     *（{@code uk_phone} 尚未上线，DB 层拦不住）。之后该号 {@code findByPhone} 返回多行，
+     * 抛 {@code IncorrectResultSizeDataAccessException}，这个号就永久登不上了。
+     * <p>
+     * 用 Lua 而非 Redis 6.2+ 的 {@code GETDEL}：目标机是 Redis 6，6.2 以下没有该命令；
+     * Lua 从 2.6 起就有。<b>仅注册流程用它</b> —— 短信登录刻意**不能**提前消费验证码，
+     * 见 {@code loginBySms} 里的顺序约束。
+     */
+    private static final DefaultRedisScript<Long> CONSUME_CODE_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            Long.class);
 
     // ==================== 原有登录方式（保留兼容） ====================
 
@@ -117,33 +134,14 @@ public class AuthServiceImpl implements AuthService {
     @Override
     @Transactional
     public UserVO register(RegisterDTO dto) {
-        // 短信验证码校验（选填：传了 phone + code 则必须校验）
-        if (dto.getPhone() != null && !dto.getPhone().isBlank()) {
-            if (!dto.getPhone().matches(RedisKeys.PHONE_REGEX)) {
-                throw new BusinessException(
-                        AuthErrorCode.PHONE_FORMAT_INVALID.getCode(),
-                        AuthErrorCode.PHONE_FORMAT_INVALID.getMessage());
-            }
-            if (dto.getCode() == null || dto.getCode().isBlank()) {
-                throw new BusinessException(400, "验证码不能为空");
-            }
-            String codeKey = RedisKeys.smsCodeKey(dto.getPhone());
-            String storedCode = redisTemplate.opsForValue().get(codeKey);
-            if (storedCode == null || !storedCode.equals(dto.getCode())) {
-                throw new BusinessException(
-                        AuthErrorCode.SMS_CODE_INVALID.getCode(),
-                        AuthErrorCode.SMS_CODE_INVALID.getMessage());
-            }
-            redisTemplate.delete(codeKey);
-
-            // 手机号唯一性检查
-            if (userRepository.existsByPhone(dto.getPhone())) {
-                throw new BusinessException(400, "该手机号已被注册");
-            }
-        }
-
-        if (userRepository.existsByUsername(dto.getUsername())) {
-            throw new BusinessException("用户名已存在");
+        // 手机号必填（@NotBlank 已兜一层，此处 null 归一为 "" 走同一个格式错误，不抛 NPE）。
+        // 统一 trim 后使用：让「格式校验 / 取验证码 key / 唯一性检查 / 落库」四处拿到同一个值，
+        // 否则带空格的号码可能存进库，之后 findByPhone 永远匹配不上。
+        String phone = dto.getPhone() == null ? "" : dto.getPhone().trim();
+        if (!phone.matches(RedisKeys.PHONE_REGEX)) {
+            throw new BusinessException(
+                    AuthErrorCode.PHONE_FORMAT_INVALID.getCode(),
+                    AuthErrorCode.PHONE_FORMAT_INVALID.getMessage());
         }
 
         // 角色白名单：自助注册只允许 老师(3) / 学生(4)。
@@ -155,6 +153,33 @@ public class AuthServiceImpl implements AuthService {
             throw new BusinessException("无效的角色类型: " + dto.getRoleType());
         }
 
+        // 用户名唯一性检查。刻意放在验证码校验**之前**：用户名被占用是最常见的失败，
+        // 不该为此烧掉用户手里那条验证码 —— 否则用户得等 sendSms 的 60 秒频控
+        //（SMS_LIMIT_TTL）才能重来。用户名不构成枚举风险，前端本来就要把这个提示展示给用户。
+        if (userRepository.existsByUsername(dto.getUsername())) {
+            throw new BusinessException("用户名已存在");
+        }
+
+        // 验证码校验 + 一次性消费（原子：比对成功才删，见 CONSUME_CODE_SCRIPT）
+        //
+        // ⚠️ 顺序约束，不要改动：验证码校验必须留在下面 existsByPhone **之前**。
+        // 一旦把手机号查询提前，攻击者用任意垃圾验证码打本接口，就能靠
+        // 40003（码错）与「该手机号已被注册」的差异免费枚举已注册手机号。
+        String codeKey = RedisKeys.smsCodeKey(phone);
+        String submittedCode = dto.getCode() == null ? "" : dto.getCode();
+        Long consumed = redisTemplate.execute(
+                CONSUME_CODE_SCRIPT, Collections.singletonList(codeKey), submittedCode);
+        if (consumed == null || consumed == 0L) {
+            throw new BusinessException(
+                    AuthErrorCode.SMS_CODE_INVALID.getCode(),
+                    AuthErrorCode.SMS_CODE_INVALID.getMessage());
+        }
+
+        // 手机号唯一性检查（放在消费之后，见上面的顺序约束）
+        if (userRepository.existsByPhone(phone)) {
+            throw new BusinessException(400, "该手机号已被注册");
+        }
+
         User user = User.builder()
                 .uid(generateUid())
                 .username(dto.getUsername())
@@ -162,11 +187,8 @@ public class AuthServiceImpl implements AuthService {
                 .realName(dto.getRealName())
                 .roleType(roleEnum.getDbValue())
                 .status(1)
+                .phone(phone)
                 .build();
-
-        if (dto.getPhone() != null && !dto.getPhone().isBlank()) {
-            user.setPhone(dto.getPhone());
-        }
 
         userRepository.save(user);
 
