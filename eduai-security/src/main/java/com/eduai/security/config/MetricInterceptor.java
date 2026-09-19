@@ -25,6 +25,10 @@ public class MetricInterceptor implements HandlerInterceptor {
         try {
             Long uid = StpUtil.getLoginIdAsLong();
             metricService.heartbeat(uid);
+            // DAU/MAU 埋点：与在线心跳同源（每个已登录请求），但按自然日分桶、长期保留。
+            // 刻意不塞进 heartbeat 内部：两者保留策略完全不同（5 分钟 vs 31 天），
+            // 合并会让「当前在线」这个只读短期窗口的指标也被写进日桶。
+            metricService.markDailyActive(uid);
         } catch (Exception ignored) {
             // 未登录 / token 无效：不打点
         }

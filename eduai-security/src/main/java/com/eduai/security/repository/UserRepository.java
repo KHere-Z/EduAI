@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,6 +37,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     /** 按角色类型统计用户数 */
     long countByRoleType(Integer roleType);
+
+    /**
+     * 统计在指定时间点**之后**登录过、且角色属于给定集合的用户数 —— 日活 / 月活的数据源。
+     * <p>
+     * 用派生 COUNT 而非「查列表再 size()」：只回一个数，不把行拉进内存。
+     * {@code lastLogin} 为 null 的用户天然不计入（SQL 里 {@code NULL > ?} 为 UNKNOWN），
+     * {@code roleType} 为 null 的同样不计入（{@code NULL IN (...)} 为 UNKNOWN），均符合预期。
+     */
+    long countByLastLoginAfterAndRoleTypeIn(LocalDateTime time, Collection<Integer> roleTypes);
 
     /**
      * 按 ID 加悲观写锁查询（SELECT ... FOR UPDATE），用于智学点扣减等需防并发超扣的场景。

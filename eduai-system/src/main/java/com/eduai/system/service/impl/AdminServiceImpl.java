@@ -8,6 +8,7 @@ import com.eduai.common.util.PasswordUtil;
 import com.eduai.security.entity.Organization;
 import com.eduai.security.entity.Teacher;
 import com.eduai.security.entity.User;
+import com.eduai.security.enums.RoleEnum;
 import com.eduai.security.repository.OrganizationRepository;
 import com.eduai.security.repository.TeacherRepository;
 import com.eduai.security.repository.UserRepository;
@@ -32,6 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -56,6 +58,18 @@ public class AdminServiceImpl implements AdminService {
     private final DeepSeekConfig deepSeekConfig;
     private final QuestionRepository questionRepository;
     private final MetricService metricService;
+
+    /**
+     * 活跃用户（日活/月活）口径限定的角色：学生 + 老师。
+     * <p>
+     * 刻意**排除管理员**（roleType=1，且根本不在 {@link RoleEnum} 里）：管理员是内部运营，
+     * 混进「活跃用户」会污染产品真实使用者的口径。与并排的「老师总数 / 学生总数」同属一个分母体系。
+     * <p>
+     * 取 {@link RoleEnum#getDbValue()} 而非硬编码 3/4：枚举是这两个角色码的权威来源。
+     */
+    private static final List<Integer> ACTIVE_ROLE_TYPES = List.of(
+            RoleEnum.TEACHER.getDbValue(), RoleEnum.STUDENT.getDbValue());
+
 
     // ==================== 权限检查 ====================
 
@@ -680,6 +694,23 @@ public class AdminServiceImpl implements AdminService {
         long sessionCount = studentSessionRepository.countTotal();
         long enrollmentCount = studentEnrollmentRepository.countTotal();
 
+        // 活跃用户 —— 口径 = users.last_login（登录时由 doLogin 写入，无需登录日志表），
+        // 角色限定为「学生 + 老师」，见 ACTIVE_ROLE_TYPES。
+        //
+        // ⚠️ 这是「登录日活」，会**系统性低估**访问日活：Sa-Token 配的是 timeout=7 天 +
+        //    active-timeout=-1，即登录态内不会重新签发 token、也不校验空闲时长，
+        //    所以当天回访的老用户根本不会再走一次 login，last_login 停在首次登录那天。
+        //    精确口径是 MetricService 里的 metric:active:daily:{date} 按天埋点
+        //    （每个已登录请求都打点），但那是新埋点、当天从 0 开始，攒满 30 天才能切。
+        //    当前先用本口径把数字顶上，不让前端看到 0。
+        //
+        // dailyActiveUsers 的「今日」取服务器本地时区自然日 0 点，与前端展示的「今日」一致；
+        // monthlyActiveUsers 取「此刻往前 30×24h」滑动窗（不是自然日），对 30 天这个量级无影响。
+        long dailyActiveUsers = userRepository.countByLastLoginAfterAndRoleTypeIn(
+                LocalDate.now().atStartOfDay(), ACTIVE_ROLE_TYPES);
+        long monthlyActiveUsers = userRepository.countByLastLoginAfterAndRoleTypeIn(
+                LocalDateTime.now().minusDays(30), ACTIVE_ROLE_TYPES);
+
         return AdminStatsVO.builder()
                 .teacherCount(teacherCount)
                 .studentCount(studentCount)
@@ -687,6 +718,8 @@ public class AdminServiceImpl implements AdminService {
                 .relationCount(relationCount)
                 .sessionCount(sessionCount)
                 .enrollmentCount(enrollmentCount)
+                .dailyActiveUsers(dailyActiveUsers)
+                .monthlyActiveUsers(monthlyActiveUsers)
                 .build();
     }
 
