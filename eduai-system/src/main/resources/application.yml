@@ -107,10 +107,26 @@ sa-token:
   is-share: true
   token-style: tik
   is-log: false
-  # Redis 会话共享（多实例部署时启用）
-  alone-redis:
-    database: 1
-    timeout: 3000ms
+  # ⚠️ 会话存储当前是 Sa-Token 的默认内存实现（SaTokenDaoDefaultImpl）。
+  # 项目未引入 sa-token-redis-jackson 等任何 Redis DAO 插件，因此下面这段 alone-redis
+  # **完全不生效** —— SaAloneRedisInject 开头就判断「DAO 不是默认实现才注入」，是内存实现直接 return。
+  # 后果：token 存在 JVM 堆里 → 重启即全员掉线，也无法多实例部署。
+  #
+  # 要真正启用 Redis 会话（重启不掉线 + 多实例共享），两步：
+  #   1) pom 加依赖 sa-token-redis-jackson（提供 Redis 版 SaTokenDao）。
+  #      注意：已有的 sa-token-alone-redis 单独加了没用，它只是「把 Sa-Token 的 Redis 指到另一个库」，
+  #      必须配合上面那个 DAO 插件才有意义。
+  #   2) 放开下面的配置，并**显式补全 host/port/password** —— alone-redis 用自己独立的前缀 bind，
+  #      不继承 spring.data.redis.*，缺省会静默连 localhost:6379 且无密码。
+  #   ⚠️ 代价：启用后登录的可用性就绑在 Redis 上了（Redis 挂 = 登录挂），
+  #      上线前请一并确认 Redis 的持久化与密码（见运维待办「Redis 加固」）。
+  #
+  # alone-redis:
+  #   host: ${REDIS_HOST:localhost}
+  #   port: 6379
+  #   password: ${REDIS_PASSWORD:}
+  #   database: 1
+  #   timeout: 3000ms
 
 # Knife4j API 文档（生产默认关闭；开发由 application-dev.yml 开启）
 knife4j:
