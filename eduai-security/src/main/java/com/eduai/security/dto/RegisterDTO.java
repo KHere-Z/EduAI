@@ -22,10 +22,14 @@ public class RegisterDTO {
     @NotNull(message = "角色类型不能为空")
     private Integer roleType;
 
-    // ===== 短信验证码（注册时选填，填了必须校验） =====
+    // ===== 短信验证码（**必填**） =====
+    // 2026-09-19 起由选填改为必填：注册即送 49 智学点 + 7 天体验会员，
+    // 不绑手机号就能反复匿名注册薅礼包。绑手机号后一个号码只能注册一次。
     /** 手机号 */
+    @NotBlank(message = "手机号不能为空")
     private String phone;
     /** 短信验证码 */
+    @NotBlank(message = "验证码不能为空")
     private String code;
 
     // ===== 教师注册专属字段 =====
