@@ -8,6 +8,7 @@ import com.eduai.system.dto.HomeworkDTO;
 import com.eduai.system.entity.*;
 import com.eduai.system.repository.*;
 import com.eduai.system.service.HomeworkService;
+import com.eduai.system.service.ImageStorageService;
 import com.eduai.system.vo.HomeworkVO;
 import com.eduai.system.vo.SubmissionVO;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -29,6 +31,7 @@ public class HomeworkServiceImpl implements HomeworkService {
     private final UserRepository userRepository;
     private final StudentRepository studentRepository;
     private final TeacherStudentRepository teacherStudentRepository;
+    private final ImageStorageService imageStorageService;
 
     // ==================== 鉴权 ====================
 
@@ -183,7 +186,8 @@ public class HomeworkServiceImpl implements HomeworkService {
         Homework hw = homeworkRepository.findById(homeworkId)
                 .orElseThrow(() -> new BusinessException(404, "作业不存在"));
         if (!hw.getTeacherId().equals(getTeacherId())) throw new BusinessException(403, "无权修改该作业");
-        hw.setAnswerFileUrl(body.get("answerFileUrl"));
+        // 答案解析图是 \n 拼接（MathManage.vue:515 拼、:474 拆），逐张落盘
+        hw.setAnswerFileUrl(persistImages(body.get("answerFileUrl"), "\n", "homework-answer"));
         hw.setAnswerFileName(body.get("answerFileName"));
         homeworkRepository.save(hw);
         return toVO(hw);
@@ -204,8 +208,9 @@ public class HomeworkServiceImpl implements HomeworkService {
                 .findByHomeworkIdAndStudentId(homeworkId, studentId)
                 .orElseThrow(() -> new BusinessException(404, "该学生未提交"));
 
-        // 追加批改图（|||| 分隔，避免 base64 逗号冲突）
-        String newUrl = (String) body.get("correctedImageUrl");
+        // 追加批改图（|||| 分隔，避免 base64 逗号冲突）。
+        // 新图先落盘：corrected_image_url 是 TEXT(64KB)，直接塞 base64 会 1406 或静默截断。
+        String newUrl = persistImages((String) body.get("correctedImageUrl"), "||||", "homework-correct");
         String existing = sub.getCorrectedImageUrl();
         if (existing != null && !existing.isBlank()) {
             sub.setCorrectedImageUrl(existing + "||||" + newUrl);
@@ -283,11 +288,19 @@ public class HomeworkServiceImpl implements HomeworkService {
         Object imgObj = body.containsKey("imageUrl") ? body.get("imageUrl") : body.get("submittedImageUrl");
         log.info("收到提交: homeworkId={}, imageUrl={}", homeworkId,
                 imgObj instanceof List<?> l ? "数组(" + l.size() + "张)" : imgObj);
+        // 分隔符必须保持 ","：读取端 Homework.vue:105 与 MathManage.vue:448 都按逗号拆，
+        // 改成 JSON 数组字符串（["data:...","data:..."]）会让两处同时哑掉。
+        // 前端传的是**数组**（Homework.vue:157 { imageUrl: allImgs }），所以这里逐个元素落盘，
+        // 不按逗号拆 —— data URL 头部 data:image/jpeg;base64, 自带一个逗号，拆了就坏。
         String img;
         if (imgObj instanceof List<?> list) {
-            img = list.stream().map(Object::toString).collect(Collectors.joining(","));
+            img = list.stream().map(Object::toString)
+                    .map(v -> imageStorageService.persistIfBase64(v, "homework-submit"))
+                    .collect(Collectors.joining(","));
         } else {
-            img = imgObj instanceof String s ? s : "";
+            // 字符串分支（旧客户端单图）：整体落盘。若是多张拼成的串，persistIfBase64 内部
+            // 解码会因非法字符抛异常并原样返回 —— 退化为无操作，不会写坏数据。
+            img = imgObj instanceof String s ? imageStorageService.persistIfBase64(s, "homework-submit") : "";
         }
         sub.setSubmittedImageUrl(img);
         sub.setStatus("submitted");
@@ -305,6 +318,33 @@ public class HomeworkServiceImpl implements HomeworkService {
     }
 
     // ==================== 内部 ====================
+
+    /**
+     * 把「分隔符拼接的多图字符串」逐段过一遍 {@link ImageStorageService#persistIfBase64}，
+     * 让 base64 data URL 落盘成 URL 后再入库 —— 与题库（{@code QuestionBankServiceImpl} 的
+     * uploadQuestion / updateQuestion / gradeQuestion / addWrongQuestion / saveAnswer）同一口径。
+     * <p>
+     * <b>为什么必须做</b>：homework / homework_submissions 的图片列是 {@code TEXT}(64KB)，
+     * 而题库三列是 {@code MEDIUMTEXT}。学生端压 1024px/JPEG 0.7（{@code Homework.vue:148}）、
+     * 老师端 800px（{@code MathManage.vue} 的 fileToBase64），单张 base64 就已接近甚至超过 64KB，
+     * 多张拼接必超 —— 严格模式报 1406（HTTP 500），非严格模式静默截断成坏图。
+     * 落盘后 DB 只留轻量 URL，与 {@code ImageStorageService} 类头「base64 整列载入是内存热点」的
+     * 结论一致。
+     * <p>
+     * <b>分隔符必须是 base64 字母表外的字符</b>：{@code \n} 与 {@code ||||} 都安全；
+     * <b>逗号不安全</b> —— data URL 头部 {@code data:image/jpeg;base64,} 自带一个逗号，
+     * 按逗号拆会把图拆坏。学生提交那条路因此不在这里拆（前端传的是数组，逐元素处理）。
+     * <p>
+     * 全段都不含 base64 时直接返回原值，不产生额外开销（已落盘的 URL 会被原样带回重发）。
+     */
+    private String persistImages(String joined, String delimiter, String subDir) {
+        if (joined == null || joined.isBlank() || !joined.contains("data:image/")) {
+            return joined;
+        }
+        return Arrays.stream(joined.split(Pattern.quote(delimiter), -1))
+                .map(v -> imageStorageService.persistIfBase64(v, subDir))
+                .collect(Collectors.joining(delimiter));
+    }
 
     private HomeworkVO toVO(Homework hw) {
         return toVO(hw, getTeacherName(hw.getTeacherId()));
