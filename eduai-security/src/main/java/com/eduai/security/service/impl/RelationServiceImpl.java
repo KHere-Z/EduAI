@@ -1,6 +1,7 @@
 package com.eduai.security.service.impl;
 
 import com.eduai.common.BusinessException;
+import com.eduai.common.util.NameUtil;
 import com.eduai.security.entity.User;
 import com.eduai.security.entity.UserRelation;
 import com.eduai.security.enums.RoleEnum;
@@ -12,6 +13,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -350,8 +352,13 @@ public class RelationServiceImpl implements RelationService {
     /**
      * 同意请求后，如果是教师↔学生关系，同步写入 teacher_student 表。
      * <p>
-     * 若学生自注册未在 students 表中，自动创建 students 记录。
-     * 这保证了全系统（排课/错题/试卷/管理员端）对新旧关系入口兼容。
+     * 学生档案在注册时就已建立（{@code AuthServiceImpl.createStudentProfile}），而
+     * {@link #ensureStudentRecord} 是按 {@code user_id} 精确查的，所以这里命中的
+     * <b>就是学生自己存试卷的那条档案</b> —— 这正是「老师添加学生后能看到该生此前
+     * 全部试卷与错题」得以成立的机制。
+     * <p>
+     * {@code ensureStudentRecord} 的 INSERT 分支因此降级为兜底，只对「本次改动之前
+     * 注册的存量账号」和「档案被管理员删除过」的账号生效。
      */
     private void syncToTeacherStudent(UserRelation rel) {
         User from = userRepository.findByUid(rel.getFromUid()).orElse(null);
@@ -376,7 +383,8 @@ public class RelationServiceImpl implements RelationService {
             return;
         }
 
-        // 确保 students 和 teachers 表有对应记录（自注册的可能没有）
+        // 确保 students / teachers 表有对应记录。学生档案正常在注册时就已存在，
+        // 这里的 ensureStudentRecord 是「存量账号 / 档案被管理员删过」的兜底（见方法头注释）。
         ensureTeacherRecord(teacherUserId);
         Long studentRecordId = ensureStudentRecord(studentUser);
 
@@ -428,16 +436,21 @@ public class RelationServiceImpl implements RelationService {
         }
 
         // 不存在 → 自动创建
-        String name = studentUser.getRealName();
-        if (name == null || name.isBlank()) name = studentUser.getNickname();
-        if (name == null || name.isBlank()) name = "新同学";
-
-        jdbcTemplate.update(
-                "INSERT INTO students (name, user_id, subjects, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
-                name, studentUser.getId(), studentUser.getSubjects());
-        recordId = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
-        log.info("自动创建students记录: id={} userId={} name={}", recordId, studentUser.getId(), name);
-        return recordId;
+        String name = NameUtil.displayName(studentUser.getRealName(), studentUser.getNickname());
+        try {
+            jdbcTemplate.update(
+                    "INSERT INTO students (name, user_id, subjects, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())",
+                    name, studentUser.getId(), studentUser.getSubjects());
+            log.info("自动创建students记录: userId={} name={}", studentUser.getId(), name);
+        } catch (DuplicateKeyException e) {
+            // 并发：另一条路径（注册 / 个人中心补档案）刚建好同一条档案，被 uk_user_id 兜住。
+            // 不抛出 —— 下面按 user_id 回查即可拿到同一条。
+            log.info("students 并发建档，改为复用既有行: userId={}", studentUser.getId());
+        }
+        // 统一按 user_id 回查：正常插入与并发命中两条路都能拿到正确 id。
+        // ⚠️ 不能用 SELECT LAST_INSERT_ID()：并发捕获后它返回的是本连接上一次无关的插入 id。
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM students WHERE user_id = ?", Long.class, studentUser.getId());
     }
 
     // ==================== 内部辅助 ====================

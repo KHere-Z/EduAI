@@ -233,7 +233,10 @@ public class AdminServiceImpl implements AdminService {
         // 更新 Student 基本信息
         student.setName(dto.getName());
         student.setGender(dto.getGender());
-        student.setContact(dto.getContact());
+        // 判空写入：注册时已把手机号写进 students.contact（AuthServiceImpl.createStudentProfile），
+        // 无条件覆盖会让「没填联系方式」的一次编辑把手机号永久抹成 NULL —— 不可逆。
+        // 代价：管理员无法再通过清空表单来清除 contact。
+        if (dto.getContact() != null) student.setContact(dto.getContact());
         student.setGrade(dto.getGrade());
         student.setSchool(dto.getSchool());
         studentRepository.save(student);

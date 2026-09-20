@@ -32,7 +32,13 @@ public class AdminStudentDTO {
     /** 任课老师ID列表（多对多，每个ID创建一条 teacher_student 记录） */
     private List<Long> teacherIds;
 
-    /** 登录用户名（选填，填了会同时创建 roleType=4 的学生用户） */
+    /**
+     * 登录用户名（选填，填了会同时创建 roleType=4 的学生用户）。
+     * <p>
+     * <b>用户名已存在则直接报错</b> —— 不复用已有账号、不改其密码（见
+     * {@code AdminServiceImpl.createStudent}）。所以这里<b>不能</b>用来把某个已自助注册的
+     * 学生「连」到档案上；那件事的唯一入口是学生在个人中心输老师 UID 发起关联请求。
+     */
     private String username;
 
     /** 登录密码（选填，与 username 配合） */

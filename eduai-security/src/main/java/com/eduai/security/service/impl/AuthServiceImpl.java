@@ -6,6 +6,7 @@ import cn.hutool.core.util.RandomUtil;
 import com.eduai.common.BusinessException;
 import com.eduai.common.Result;
 import com.eduai.common.storage.CosStorageService;
+import com.eduai.common.util.NameUtil;
 import com.eduai.common.util.PasswordUtil;
 import com.eduai.security.constant.RedisKeys;
 import com.eduai.security.dto.*;
@@ -31,6 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -192,6 +194,27 @@ public class AuthServiceImpl implements AuthService {
 
         userRepository.save(user);
 
+        // 学生即建档案 —— 注册完必须能立刻保存试卷分析结果（含错题详解）。
+        //
+        // 为什么非在此处不可：exam_papers.student_id 是 NOT NULL 且注释为
+        // 「学生ID → students.id」（该表没有 user_id 列），而写路径
+        // ExamPaperServiceImpl.createExamPaper 走 getCurrentStudent()，档案缺失直接
+        // BusinessException(404)。AI 分析那头（AIController.analyzeExamStream）只扣点、
+        // 不查 students，所以「能分析、存不下来」是修复前的真实故障。
+        //
+        // 位置理由（相对 save / 礼包）：
+        //   1) 必须在 save 之后：需要 IDENTITY 回填的 user.getId()；
+        //   2) 放在礼包之前：档案是「账号可用」的前置条件，礼包是附赠权益。同一
+        //      @Transactional 内回滚语义一致，但代码顺序上前置条件先落，将来礼包
+        //      那段若插入提前 return / 条件分支，档案不会被跳过。
+        //
+        // 用裸 SQL 而非 Student 实体：Student / StudentRepository 都在 eduai-system，
+        // 本类在 eduai-security（只依赖 eduai-common），引实体要新增模块依赖 ——
+        // 与 saveStudentGradeSchool、RelationServiceImpl.ensureStudentRecord 同一取舍。
+        if (roleEnum == RoleEnum.STUDENT) {
+            createStudentProfile(user, phone);
+        }
+
         // 新用户注册欢迎礼包：49 智学点 + 7 天体验会员
         pointService.charge(user.getId(), 49, "gift", "新用户注册奖励 49 点");
         // 体验会员本身不赠点，点数由上面那笔单独发放（grantTrialMembership 内部刻意不 charge）
@@ -267,7 +290,43 @@ public class AuthServiceImpl implements AuthService {
         return toUserVO(user);
     }
 
-    /** 学生档案：写 grade/school 到 students 表（无记录则自动创建） */
+    /**
+     * 建 students 档案：自助注册的学生账号 ↔ 一条全局唯一档案（user_id 唯一）。
+     * <p>
+     * 这是「学生不添加老师 UID 也能用试卷分析」的全部实现 —— 有了 student.id，
+     * 保存试卷、错题详解、PDF 导出才落得下库。老师之后通过 UID 关联时，
+     * {@code RelationServiceImpl.ensureStudentRecord} 按 user_id 反查会命中同一条，
+     * 于是学生此前存下的数据被完整接收。
+     * <p>
+     * contact 写手机号 —— 与管理员建号路径同口径（{@code AdminServiceImpl} 建号时
+     * 同一份 phone 同时进 users.phone 与 students.contact）。
+     * <p>
+     * grade / school / subjects <b>一律留空</b>：RegisterDTO 没有这三个字段；
+     * students.subjects 的口径是「以用户个人中心修改为准」，由 updateProfile 在
+     * 用户真正选了学科后写入，此处写 NULL 才是诚实值；school 尤其不能编造 ——
+     * 管理员端按「姓名+学校」去重靠 SQL 等值比较，为「让去重好使」随便填学校
+     * 只会制造更隐蔽的错配。
+     * <p>
+     * 不加 SELECT COUNT(*) 预检：user 是本事务刚 INSERT 的，uk_username / uk_phone
+     * 保证唯一，不可能已有档案。日志不打印手机号（PII）。
+     */
+    private void createStudentProfile(User user, String phone) {
+        jdbcTemplate.update(
+                "INSERT INTO students (name, user_id, contact, created_at, updated_at) "
+                        + "VALUES (?, ?, ?, NOW(), NOW())",
+                NameUtil.displayName(user.getRealName(), user.getNickname()),
+                user.getId(),
+                phone);
+        log.info("自助注册已建学生档案: userId={}, uid={}", user.getId(), user.getUid());
+    }
+
+    /**
+     * 学生档案：写 grade/school 到 students 表。
+     * <p>
+     * 学生档案在<b>注册时就已建立</b>（见 {@link #createStudentProfile}），所以这里的
+     * INSERT 分支现在只对两类账号生效：本次改动之前注册的存量账号，以及档案被管理员
+     * 删除过的账号。正常路径会直接落到下面的 UPDATE。
+     */
     private void saveStudentGradeSchool(User user, String grade, String school) {
         if (user.getRoleType() == null || user.getRoleType() != 4) {
             return;
@@ -275,13 +334,17 @@ public class AuthServiceImpl implements AuthService {
         Integer cnt = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM students WHERE user_id = ?", Integer.class, user.getId());
         if (cnt == null || cnt == 0) {
-            String name = user.getRealName();
-            if (name == null || name.isBlank()) name = user.getNickname();
-            if (name == null || name.isBlank()) name = "新同学";
-            jdbcTemplate.update(
-                    "INSERT INTO students (name, user_id, grade, school, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())",
-                    name, user.getId(), grade, school);
-            return;
+            try {
+                jdbcTemplate.update(
+                        "INSERT INTO students (name, user_id, grade, school, created_at, updated_at) VALUES (?, ?, ?, ?, NOW(), NOW())",
+                        NameUtil.displayName(user.getRealName(), user.getNickname()),
+                        user.getId(), grade, school);
+                return;
+            } catch (DuplicateKeyException e) {
+                // 并发：另一条路径（注册 / 师生关系通过）刚建好同一条档案，被 uk_user_id 兜住。
+                // 不 return —— 落到下面的 UPDATE 把 grade/school 写进去，结果与正常路径一致。
+                log.info("students 并发建档，改为更新既有行: userId={}", user.getId());
+            }
         }
         StringBuilder sql = new StringBuilder("UPDATE students SET ");
         List<Object> args = new ArrayList<>();
@@ -546,6 +609,12 @@ public class AuthServiceImpl implements AuthService {
      * 见 {@link #bindPhone} 注释第 4 条「手机号无账号 → createUserByRole 建号 + 建绑定」。
      * 若微信绑定最终不走这条路径，可连同 {@code TeacherRegisterInfo} /
      * {@code StudentRegisterInfo} 一并删除。
+     * <p>
+     * ⚠️⚠️ <b>恢复调用时，学生分支必须保留 {@link #createStudentProfile} 调用</b>
+     * （就在下面的「学生自注册」段）。漏掉它就会建出「有账号、没档案」的 roleType=4
+     * 用户 —— 正是本方法旁边 {@code register} 刚修掉的那个洞：没有 {@code students} 行
+     * 就没有 {@code student.id}，试卷分析能算但存不下来，学生端还会到处报
+     * 「未找到学生档案」。
      */
     private User createUserByRole(String phone, String role,
                                    TeacherRegisterInfo teacherInfo,
@@ -591,6 +660,12 @@ public class AuthServiceImpl implements AuthService {
                     .subjectIds(subjects != null && !subjects.isEmpty() ? String.join(",", subjects) : "")
                     .build();
             teacherRepository.save(teacher);
+        }
+
+        // 学生自注册：自动创建 students 档案（与 register 同一口径，见 createStudentProfile）
+        // ⚠️ 恢复调用本方法时不要删这段，理由见方法头注释第 2 个 ⚠️。
+        if (roleEnum == RoleEnum.STUDENT) {
+            createStudentProfile(user, phone);
         }
 
         log.info("新用户注册: uid={}, phone={}, role={}", user.getUid(), maskPhone(phone), role);

@@ -56,12 +56,18 @@ public interface ResourceService {
     void deleteSection(Long id);
 
     // ==================== 资源文件 ====================
-    /** 查询某节点资源（含子级聚合），nodeType ∈ textbook/chapter/section；type/year 可选过滤 */
-    List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year);
+    /**
+     * 查询某节点资源（含子级聚合），nodeType ∈ textbook/chapter/section；type/year 可选过滤。
+     *
+     * @param mine true = 只看当前用户上传的（老师上传管理页）；false = 全局可见范围（学习资源浏览页）。
+     *             管理员不受此参数限制，始终返回全局。
+     */
+    List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year,
+                                       boolean mine);
 
-    /** 查询某节点资源（含子级聚合，分页）：total 为过滤后聚合全量条数，list 为切片 */
+    /** 查询某节点资源（含子级聚合，分页）：total 为过滤后聚合全量条数，list 为切片。mine 语义同上 */
     ResourceFilePageVO listResourcesPage(String nodeType, Long nodeId, String subject, String type, String year,
-                                         int page, int pageSize);
+                                         boolean mine, int page, int pageSize);
 
     /** 上传资源（多文件），previewPaths 为 JSON 字符串数组，与 files[] 按索引对齐 */
     List<ResourceFileVO> uploadResources(String nodeType, Long nodeId, String subject, String tag,

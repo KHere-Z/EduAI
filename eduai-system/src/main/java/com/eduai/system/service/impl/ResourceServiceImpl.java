@@ -81,7 +81,13 @@ public class ResourceServiceImpl implements ResourceService {
 
     // ==================== 权限校验 ====================
 
-    /** 校验当前用户是否为教师或管理员（roleType=3 或 1） */
+    /**
+     * 校验当前用户是否为教师或管理员（roleType=3 或 1）。
+     * <p>
+     * <b>只用于「上传资源」和「删除自己上传的资源」</b> —— 目录（教材/章节/小节）的增删改不归它管，
+     * 一律走 {@link #checkAdmin()}。改动前这些目录写操作也走这里，等于任何老师都能删掉全站共用的
+     * 教材目录并级联删掉别人上传的物理文件，是一处可被直接利用的漏洞。
+     */
     private User checkTeacherOrAdmin() {
         Long userId = StpUtil.getLoginIdAsLong();
         User user = userRepository.findById(userId)
@@ -92,7 +98,12 @@ public class ResourceServiceImpl implements ResourceService {
         return user;
     }
 
-    /** 校验当前用户为管理员（roleType=1） */
+    /**
+     * 校验当前用户为管理员（roleType=1）。
+     * <p>
+     * <b>教材/章节/小节目录的 12 个写操作全部走这里</b>：目录是全站共用的公共设施（存量来自种子
+     * {@code docs/sql/08-resource-catalog.sql}），老师只允许往已有节点里上传文件，不允许增删改目录。
+     */
     private User checkAdmin() {
         Long userId = StpUtil.getLoginIdAsLong();
         User user = userRepository.findById(userId)
@@ -179,7 +190,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceTextbooks", allEntries = true)
     public ResourceTextbook createTextbook(ResourceTextbookDTO dto) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         int sortOrder = textbookRepository.findTopBySubjectOrderBySortOrderDesc(dto.getSubject())
                 .map(t -> t.getSortOrder() + 1)
                 .orElse(1);
@@ -197,7 +208,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceTextbooks", allEntries = true)
     public ResourceTextbook updateTextbook(Long id, Map<String, Object> body) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceTextbook textbook = textbookRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "教材不存在"));
 
@@ -217,7 +228,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceTextbooks", allEntries = true)
     public void reorderTextbooks(List<Long> orderedIds) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         if (orderedIds == null || orderedIds.isEmpty()) return;
         for (int i = 0; i < orderedIds.size(); i++) {
             ResourceTextbook t = textbookRepository.findById(orderedIds.get(i)).orElse(null);
@@ -233,7 +244,7 @@ public class ResourceServiceImpl implements ResourceService {
             @CacheEvict(value = "resourceSections", allEntries = true)
     })
     public void deleteTextbook(Long id) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceTextbook textbook = textbookRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "教材不存在"));
 
@@ -263,7 +274,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceChapters", allEntries = true)
     public ResourceChapter createChapter(Long textbookId, ResourceChapterDTO dto) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         textbookRepository.findById(textbookId)
                 .orElseThrow(() -> new BusinessException(404, "教材不存在"));
 
@@ -282,7 +293,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceChapters", allEntries = true)
     public ResourceChapter updateChapter(Long id, Map<String, Object> body) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceChapter chapter = chapterRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "章节不存在"));
 
@@ -300,7 +311,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceChapters", allEntries = true)
     public void reorderChapters(List<Long> orderedIds) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         if (orderedIds == null || orderedIds.isEmpty()) return;
         for (int i = 0; i < orderedIds.size(); i++) {
             ResourceChapter c = chapterRepository.findById(orderedIds.get(i)).orElse(null);
@@ -315,7 +326,7 @@ public class ResourceServiceImpl implements ResourceService {
             @CacheEvict(value = "resourceSections", allEntries = true)
     })
     public void deleteChapter(Long id) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceChapter chapter = chapterRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "章节不存在"));
 
@@ -341,7 +352,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceSections", allEntries = true)
     public ResourceSection createSection(Long chapterId, ResourceSectionDTO dto) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         chapterRepository.findById(chapterId)
                 .orElseThrow(() -> new BusinessException(404, "章节不存在"));
 
@@ -360,7 +371,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceSections", allEntries = true)
     public ResourceSection updateSection(Long id, Map<String, Object> body) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceSection section = sectionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "小节不存在"));
 
@@ -378,7 +389,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceSections", allEntries = true)
     public void reorderSections(List<Long> orderedIds) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         if (orderedIds == null || orderedIds.isEmpty()) return;
         for (int i = 0; i < orderedIds.size(); i++) {
             ResourceSection s = sectionRepository.findById(orderedIds.get(i)).orElse(null);
@@ -390,7 +401,7 @@ public class ResourceServiceImpl implements ResourceService {
     @Transactional
     @CacheEvict(value = "resourceSections", allEntries = true)
     public void deleteSection(Long id) {
-        checkTeacherOrAdmin();
+        checkAdmin();
         ResourceSection section = sectionRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "小节不存在"));
 
@@ -403,15 +414,16 @@ public class ResourceServiceImpl implements ResourceService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year) {
-        return listResourcesFiltered(nodeType, nodeId, type, year);
+    public List<ResourceFileVO> listResources(String nodeType, Long nodeId, String subject, String type, String year,
+                                              boolean mine) {
+        return listResourcesFiltered(nodeType, nodeId, type, year, mine);
     }
 
     @Override
     @Transactional(readOnly = true)
     public ResourceFilePageVO listResourcesPage(String nodeType, Long nodeId, String subject, String type, String year,
-                                                int page, int pageSize) {
-        List<ResourceFileVO> all = listResourcesFiltered(nodeType, nodeId, type, year);
+                                                boolean mine, int page, int pageSize) {
+        List<ResourceFileVO> all = listResourcesFiltered(nodeType, nodeId, type, year, mine);
         long total = all.size();
         int from = (page - 1) * pageSize;
         if (from >= total) {
@@ -423,15 +435,29 @@ public class ResourceServiceImpl implements ResourceService {
                 .list(all.subList(from, to)).total(total).page(page).pageSize(pageSize).build();
     }
 
-    /** 聚合 + 鉴权过滤 + type/year 过滤 + VO 转换，供全量与分页两种列表共用 */
-    private List<ResourceFileVO> listResourcesFiltered(String nodeType, Long nodeId, String type, String year) {
+    /**
+     * 聚合 + 鉴权过滤 + type/year 过滤 + VO 转换，供全量与分页两种列表共用。
+     * <p>
+     * {@code mine=true} = 「只看我上传的」，供老师的上传管理页使用；学习资源浏览页不传，看全局。
+     * <b>管理员不受 mine 限制</b> —— admin 的上传面板要能看全局并管理，与 {@link #canReadResource}
+     * 里 {@code roleType == 1} 直接放行是同一套口径。因此前端可以**无条件**传 {@code mine=true}，
+     * 不必按角色分支。
+     */
+    private List<ResourceFileVO> listResourcesFiltered(String nodeType, Long nodeId, String type, String year,
+                                                       boolean mine) {
         checkAuthenticated();
         CurrentUser ctx = currentUser();
+        // 管理员是公共目录的维护者，mine 对他不生效
+        boolean onlyMine = mine && ctx.roleType != 1;
         return collectFilesUnderNode(nodeType, nodeId)
                 .stream()
-                .filter(f -> canReadResource(f, ctx))
-                // 仅展示已通过资源 + 本人上传的（含待审核/驳回，用于展示审核进度）
-                .filter(f -> "approved".equals(f.getStatus())
+                .filter(f -> onlyMine
+                        ? (ctx.userId != null && ctx.userId.equals(f.getUploaderId()))
+                        : canReadResource(f, ctx))
+                // 全局路径：仅展示已通过资源 + 本人上传的（含待审核/驳回，用于展示审核进度）。
+                // onlyMine 时这道闸整体跳过 —— 本人必须看得见自己那条 pending/rejected，
+                // 否则管理页看不到自己的审核进度（被 canReadResource 之外的这道闸吞掉）。
+                .filter(f -> onlyMine || "approved".equals(f.getStatus())
                         || (ctx.userId != null && ctx.userId.equals(f.getUploaderId())))
                 .filter(f -> type == null || type.isBlank() || type.equals(f.getType()))
                 .filter(f -> year == null || year.isBlank() || year.equals(f.getYear()))
@@ -484,9 +510,19 @@ public class ResourceServiceImpl implements ResourceService {
     @Override
     @Transactional
     public void deleteResource(Long id) {
-        checkTeacherOrAdmin();
+        User me = checkTeacherOrAdmin();   // 先挡住学生：学生不能管理资源
         ResourceFile resource = fileRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(404, "资源不存在"));
+
+        // 管理员可删任意；老师只能删自己上传的。
+        // 归属语义沿用 resource_file.uploader_id 的既有约定 = users.id（见 ResourceFile 字段注释
+        //「关联 users.id」，写入点 uploadResources 用的就是 uploader.getId()），
+        // 与 StpUtil.getLoginIdAsLong() 同一空间，无需 id→uid 桥接。
+        if (me.getRoleType() == null || me.getRoleType() != 1) {
+            if (resource.getUploaderId() == null || !resource.getUploaderId().equals(me.getId())) {
+                throw new BusinessException(403, "只能删除自己上传的资源");
+            }
+        }
 
         deletePhysicalFile(resource.getFilePath());
         fileRepository.delete(resource);
