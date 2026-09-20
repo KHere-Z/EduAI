@@ -33,7 +33,12 @@ import java.util.Map;
 /**
  * 学习资源 Controller（教材 → 章节 → 小节 → 资源文件）
  * <p>
- * 浏览/下载：登录即可；上传/删除目录与资源：教师(3) + 管理员(1)。
+ * 浏览/下载：登录即可。
+ * <p>
+ * <b>目录（教材/章节/小节）的增删改一律仅管理员(1)</b> —— 目录是全站共用的公共设施（存量来自种子
+ * docs/sql/08-resource-catalog.sql），任何老师改名/重排/删除都会影响所有人，且删除是<b>级联</b>的：
+ * 会连该节点下所有人的资源文件及其磁盘物理文件一起删掉，不可恢复。
+ * 老师只能往已有目录节点<b>上传</b>文件，以及删除<b>自己上传</b>的文件。
  */
 @Slf4j
 @RestController
@@ -166,7 +171,12 @@ public class ResourceController {
 
     // ==================== 资源文件 ====================
 
-    /** 资源列表（按任意层级节点，聚合子级；传 page 时分页返回 {list,total}，否则返回旧全量数组；可按 type/year 过滤） */
+    /**
+     * 资源列表（按任意层级节点，聚合子级；传 page 时分页返回 {list,total}，否则返回旧全量数组；可按 type/year 过滤）
+     * <p>
+     * {@code mine=true} = 只看自己上传的（老师上传管理页）；不传/false = 全局可见范围（学习资源浏览页）。
+     * 管理员传 mine=true 仍返回全局，故前端可无条件传，无需按角色分支。
+     */
     @GetMapping("/resources")
     public Result<?> listResources(
             @RequestParam(required = false) String nodeType,
@@ -175,16 +185,19 @@ public class ResourceController {
             @RequestParam(required = false) String subject,
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String year,
+            @RequestParam(required = false) Boolean mine,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer pageSize) {
         // 兼容旧客户端：只传 sectionId 时映射为 section 节点
         String[] node = resolveNode(nodeType, nodeId, sectionId);
         Long resolvedNodeId = Long.valueOf(node[1]);
+        boolean onlyMine = mine != null && mine;
         if (page != null) {
             int ps = pageSize != null ? pageSize : 20;
-            return Result.ok(resourceService.listResourcesPage(node[0], resolvedNodeId, subject, type, year, page, ps));
+            return Result.ok(resourceService.listResourcesPage(node[0], resolvedNodeId, subject, type, year,
+                    onlyMine, page, ps));
         }
-        return Result.ok(resourceService.listResources(node[0], resolvedNodeId, subject, type, year));
+        return Result.ok(resourceService.listResources(node[0], resolvedNodeId, subject, type, year, onlyMine));
     }
 
     /** 上传资源（多文件，挂任意层级节点） */
