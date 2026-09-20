@@ -43,7 +43,14 @@ public class Student {
     @Column(length = 100)
     private String school;
 
-    /** 关联用户ID（可选，学生登录账号 → users.id） */
+    /**
+     * 关联用户ID（学生登录账号 → users.id）。
+     * <p>
+     * 自助注册时<b>必定写入</b>（AuthServiceImpl.createStudentProfile）；管理员当年手工
+     * 建的存量档案可能为 NULL。索引 {@code uk_user_id} 为唯一索引，由
+     * {@code docs/sql/migrate-students-user-id.sql} 负责创建（刻意不加
+     * {@code @Column(unique = true)}：dev 的 ddl-auto=update 在脏数据上建唯一约束会启动失败）。
+     */
     @Column(name = "user_id")
     private Long userId;
 

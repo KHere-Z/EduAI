@@ -85,6 +85,28 @@ public class ExamPaperServiceImpl implements ExamPaperService {
                 .orElseThrow(() -> new BusinessException(404, "未找到学生档案，请联系管理员绑定账号"));
     }
 
+    /**
+     * 同 {@link #getCurrentStudent()}，但「学生档案尚未建立」返回 {@code null} 而不抛 404。
+     * <p>
+     * 档案在<b>自助注册时</b>就已建立（{@code AuthServiceImpl.createStudentProfile}），
+     * 所以 {@code null} 现在只对应两类账号：本次改动<b>之前</b>注册、且从未被老师添加过的
+     * <b>存量账号</b>，以及档案被管理员删除过的账号。仍然保留这条软化路径，是为了让这两类
+     * 账号进首页时不弹红条 —— 它们「没有档案」是既成事实，空列表才是诚实答案。
+     * <p>
+     * <b>只给「空是诚实答案」的读接口用</b>（如 {@link #listExamPapers}）。写接口
+     * （新建/更新/删除试卷、导出 PDF）必须继续走 {@link #getCurrentStudent()}：
+     * 它们要真实 {@code student.id} 才能落库 / 取到试卷。401、403 仍照抛。
+     */
+    private Student getCurrentStudentOrNull() {
+        Long userId = StpUtil.getLoginIdAsLong();
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(401, "用户不存在"));
+        if (user.getRoleType() != 4) {
+            throw new BusinessException(403, "仅学生可访问");
+        }
+        return studentRepository.findByUserId(userId).orElse(null);
+    }
+
     /** Entity → VO（批量场景用，studentName 由调用方填充） */
     private ExamPaperVO toVO(ExamPaper paper) {
         return toVO(paper, null);
@@ -153,7 +175,9 @@ public class ExamPaperServiceImpl implements ExamPaperService {
     @Override
     @Transactional(readOnly = true)
     public List<ExamPaperVO> listExamPapers(String subject) {
-        Student student = getCurrentStudent();
+        // 还没建档 ＝ 一张试卷都没有，空列表就是诚实答案
+        Student student = getCurrentStudentOrNull();
+        if (student == null) return List.of();
 
         List<ExamPaper> papers;
         if (subject != null && !subject.isBlank()) {

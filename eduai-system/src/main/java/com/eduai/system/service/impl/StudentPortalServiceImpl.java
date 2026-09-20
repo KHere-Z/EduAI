@@ -51,10 +51,36 @@ public class StudentPortalServiceImpl implements StudentPortalService {
                 .orElseThrow(() -> new BusinessException(404, "未找到学生档案，请联系管理员绑定账号"));
     }
 
+    /**
+     * 同 {@link #getCurrentStudent()}，但「学生档案尚未建立」返回 {@code null} 而不抛 404。
+     * <p>
+     * 档案在<b>自助注册时</b>就已建立（{@code AuthServiceImpl.createStudentProfile}），
+     * 所以 {@code null} 现在只对应两类账号：本次改动<b>之前</b>注册、且从未被老师添加过的
+     * <b>存量账号</b>，以及档案被管理员删除过的账号。仍然保留这条软化路径，是为了让这两类
+     * 账号进首页时不弹红条 —— 它们「没有档案」是既成事实，空列表才是诚实答案。
+     * <p>
+     * <b>只给「空是诚实答案」的读接口用</b>（列表 / 汇总）。写接口必须继续走
+     * {@link #getCurrentStudent()}：打卡、提交调课申请都要真实 {@code student.id} 才能落库，
+     * 那里报错是正当的。
+     * <p>
+     * 401（用户不存在）/ 403（非学生）仍照抛 —— 那是真错误，与档案缺失无关。
+     */
+    private Student getCurrentStudentOrNull() {
+        Long userId = StpUtil.getLoginIdAsLong();
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BusinessException(401, "用户不存在"));
+        if (user.getRoleType() != 4) {
+            throw new BusinessException(403, "仅学生可访问");
+        }
+        return studentRepository.findByUserId(userId).orElse(null);
+    }
+
     @Override
     @Transactional(readOnly = true)
     public StudentEnrollmentVO getEnrollments() {
-        Student student = getCurrentStudent();
+        // 还没建档（刚注册、老师尚未添加）＝ 没有选课，空列表就是诚实答案，不该报错
+        Student student = getCurrentStudentOrNull();
+        if (student == null) return StudentEnrollmentVO.builder().courses(List.of()).build();
 
         List<TeacherStudent> tsList = teacherStudentRepository.findByStudentId(student.getId());
 
@@ -102,7 +128,10 @@ public class StudentPortalServiceImpl implements StudentPortalService {
     @Override
     @Transactional(readOnly = true)
     public StudentScheduleVO getSchedule(Integer year, Integer month) {
-        Student student = getCurrentStudent();
+        // 还没建档 ＝ 没有排课，空课表就是诚实答案
+        Student student = getCurrentStudentOrNull();
+        if (student == null) return StudentScheduleVO.builder().schedules(List.of()).build();
+
         YearMonth ym = (year != null && month != null)
                 ? YearMonth.of(year, month) : YearMonth.now();
         LocalDate start = ym.atDay(1);
@@ -244,7 +273,12 @@ public class StudentPortalServiceImpl implements StudentPortalService {
     @Override
     @Transactional(readOnly = true)
     public StreakVO getStreak() {
-        Student student = getCurrentStudent();
+        // 还没建档 ＝ 一条打卡记录都没有，0 天就是诚实答案
+        Student student = getCurrentStudentOrNull();
+        if (student == null) {
+            return StreakVO.builder().streak(0).totalDays(0).checkedInToday(false).checkinDates(List.of()).build();
+        }
+
         LocalDate today = LocalDate.now();
 
         List<StudentCheckin> checkins = studentCheckinRepository

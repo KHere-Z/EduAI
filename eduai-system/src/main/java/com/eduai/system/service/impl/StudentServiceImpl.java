@@ -78,42 +78,36 @@ public class StudentServiceImpl implements StudentService {
         return toStudentVO(ts);
     }
 
+    /**
+     * ⛔ 已关闭：老师端不再支持直接添加学生。
+     * <p>
+     * 原实现是 {@code findByNameAndSchool(name, school)} 按「姓名+学校」去重，但学生
+     * 自助注册时 {@code students.school} 为 NULL，而 SQL 里 {@code school = NULL} 恒假
+     * （{@code NULL = NULL} 为 unknown）→ 永远匹配不上 → 为已注册学生<b>新建一条重复
+     * 空档案</b> → teacher_student 指向新档案 → 老师在自己的试卷页<b>一条试卷都看不到</b>
+     * （学生此前存下的试卷、错题全挂在旧档案上）。
+     * <p>
+     * 本表单没有 UID 字段（前端 payload 只带 name/gender/contact/grade/school 等），
+     * 后端 {@link StudentDTO} 也没有，所以这条路<b>没有任何能精确指到账号的键</b>，
+     * 只能靠姓名猜：猜不中 → 建重复档案；猜错 → 老师看到<b>别的学生</b>的试卷。
+     * 两条都不可接受。
+     * <p>
+     * <b>唯一入口改为</b>：学生在「个人中心」输入老师的 UID 发起关联请求，老师同意后由
+     * {@code RelationServiceImpl.syncToTeacherStudent} 建 teacher_student —— 它本来就按
+     * {@code user_id} 精确查，天然命中注册时建的那条档案。
+     * <p>
+     * <b>为什么抛业务异常而不是删掉本方法</b>：老师浏览器可能缓存着旧前端、按钮还在。
+     * 抛业务异常给出的是可执行指引；删掉方法会变成 404 网络错误，而若放任不管，
+     * 旧缓存会<b>静默</b>建出重复空档案，又回到「老师收不到试卷」的状态。
+     * <p>
+     * {@code update} / {@code getById} / 排课 / 课时调整<b>全部保留</b> —— 老师仍要在
+     * 学生管理页排课、调课时、看错题。
+     */
     @Override
     @Transactional
     public StudentVO create(StudentDTO dto) {
-        Long teacherId = getCurrentTeacherId();
-
-        // 1. 查找或创建 Student（按姓名+学校去重）
-        Student student = studentRepository.findByNameAndSchool(dto.getName(), dto.getSchool())
-                .orElseGet(() -> {
-                    Student s = new Student();
-                    s.setName(dto.getName());
-                    s.setGender(dto.getGender());
-                    s.setContact(dto.getContact());
-                    s.setGrade(dto.getGrade());
-                    s.setSchool(dto.getSchool());
-                    return studentRepository.save(s);
-                });
-
-        // 2. 检查是否已存在相同的老师-学生关系
-        teacherStudentRepository.findByTeacherIdAndStudentId(teacherId, student.getId())
-                .ifPresent(ts -> {
-                    throw new BusinessException("该学生已在您的列表中，请勿重复添加");
-                });
-
-        // 3. 创建老师-学生关系
-        TeacherStudent ts = new TeacherStudent();
-        ts.setTeacherId(teacherId);
-        ts.setStudentId(student.getId());
-        ts.setHoursLeft(dto.getHoursLeft() != null ? dto.getHoursLeft() : 0);
-        ts.setRegDate(dto.getRegDate());
-        ts.setEnrollments(new ArrayList<>());
-
-        buildEnrollments(ts, dto.getEnrollments());
-
-        ts = teacherStudentRepository.save(ts);
-        log.info("create: 老师{}添加学生{}成功, ts.id={}", teacherId, student.getId(), ts.getId());
-        return toStudentVO(ts);
+        throw new BusinessException(
+                "老师端不再支持直接添加学生。请让学生在「个人中心」输入您的 UID 发起关联请求，您同意后学生即出现在列表中");
     }
 
     @Override
@@ -128,7 +122,10 @@ public class StudentServiceImpl implements StudentService {
         if (student != null) {
             student.setName(dto.getName());
             student.setGender(dto.getGender());
-            student.setContact(dto.getContact());
+            // 判空写入：注册时已把手机号写进 students.contact（AuthServiceImpl.createStudentProfile），
+            // 无条件覆盖会让「没填联系方式」的一次编辑把手机号永久抹成 NULL —— 不可逆。
+            // 代价：老师无法再通过清空表单来清除 contact。
+            if (dto.getContact() != null) student.setContact(dto.getContact());
             student.setGrade(dto.getGrade());
             student.setSchool(dto.getSchool());
         }
